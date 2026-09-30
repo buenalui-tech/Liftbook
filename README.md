@@ -17,9 +17,9 @@ A workout log that runs in your phone's browser and installs to the home screen.
 | `manifest.webmanifest` | Lets phones install it as a home-screen app |
 | `config.js` | Supabase project URL and publishable key (public by design) |
 | `sw.js` | Offline cache. **Bump `VERSION` whenever you change `index.html`** |
-| `supabase/setup.sql` | Database tables and privacy rules for a new project. Run once in the Supabase SQL Editor (not uploaded to the site) |
+| `supabase/setup.sql` | Database tables and privacy rules for a new project. Run once in the Supabase SQL Editor (not used by the site) |
 | `supabase/002_body_entries.sql` | Adds the weigh-in and scan table to an existing project |
-| `tests/` | A fake Supabase for testing sync without an account (not uploaded to the site) |
+| `tests/` | A fake Supabase for testing sync without an account (not used by the site) |
 | `icon-192.png`, `icon-512.png`, `apple-touch-icon.png` | App icons, drawn by `tools/make_icons.py` |
 
 ## Run locally
@@ -32,9 +32,13 @@ Then open http://localhost:8765.
 
 ## Deploy (GitHub Pages, free)
 
-1. Create a public repo on GitHub and push this folder to it.
-2. In the repo, open **Settings → Pages**, set **Source** to *Deploy from a branch*, and choose `main` / `(root)`.
-3. The site goes live at `https://<username>.github.io/<repo>/` about a minute later.
+The site is served from `main` at https://buenalui-tech.github.io/Liftbook/. To publish an update:
+
+```bash
+git push
+```
+
+GitHub Pages rebuilds in about a minute. Phones pick up the new version the next time the app is opened.
 
 ## Cloud sync setup (Supabase, free)
 
