@@ -274,6 +274,12 @@ input[type=range]{width:100%;accent-color:var(--accent)}
 .main-sw{background:var(--lean)} .also-sw{background:#F2A0A5}
 .share-preview{display:flex;justify-content:center;align-items:center;min-height:320px;background:var(--sunk);border-radius:12px;padding:12px}
 .share-preview img{max-height:62vh;width:auto;max-width:100%;border-radius:10px;box-shadow:0 4px 18px rgba(0,0,0,.18);-webkit-touch-callout:default}
+.ed-ex{padding-block:10px;border-top:1px solid var(--line)}
+.ed-set{display:grid;grid-template-columns:36px minmax(0,1fr) minmax(0,1fr) 36px;gap:8px;align-items:center}
+.ed-set.ed-hd{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:600}
+.ed-set input{height:40px;border:1px solid var(--line);border-radius:8px;background:var(--sunk);text-align:center;font-family:var(--display);font-weight:600;font-size:18px;min-width:0;width:100%}
+.ed-set .lbl{height:36px;border:0;background:transparent;font-family:var(--display);font-weight:700;font-size:17px}
+.ed-set .lbl.warm{color:var(--warn)}
 .toast{position:fixed;left:50%;transform:translateX(-50%);top:calc(12px + env(safe-area-inset-top,0px));z-index:20;background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:10px;font-weight:600;font-size:14px;max-width:calc(100% - 32px)}
 @media (prefers-reduced-motion: no-preference){.set.done{transition:background .2s}.rest .fill{transition:width .25s linear}}
 </style>
@@ -819,6 +825,67 @@ function viewToday() {
     ${others ? `<section class="section"><p class="eyebrow">Other days</p><div class="card" style="padding-block:4px">${others}</div></section>` : ''}
     <p class="small muted">${esc(S.program.name)} · double progression: work up to the top of the rep range on every set, then add weight.</p>`;
 }
+/* ---------- editing a finished workout ---------- */
+function viewEditWorkout() {
+  const d = S.sheet.edit, u = d.unit || unit();
+  const lib = libraryExercises();
+  const exs = d.exercises.map((e, ei) => `<div class="stack ed-ex">
+      <div class="row between"><b>${esc(e.name)}</b><button class="iconbtn" data-act="ed-rm-ex" data-e="${ei}" aria-label="Remove ${esc(e.name)}">✕</button></div>
+      <div class="ed-set ed-hd"><span>Set</span><span>${e.timed ? '' : `Weight (${u})`}</span><span>${e.timed ? 'Seconds' : 'Reps'}</span><span></span></div>
+      ${e.sets.map((s, si) => `<div class="ed-set">
+        <button class="lbl ${s.warm ? 'warm' : ''}" data-act="ed-warm" data-e="${ei}" data-s="${si}" aria-label="Toggle warm-up">${s.warm ? 'W' : si + 1}</button>
+        ${e.timed ? '<span></span>' : `<input id="ed-w-${ei}-${si}" data-in="ed-w" data-e="${ei}" data-s="${si}" inputmode="decimal" value="${fmtW(s.w)}" placeholder="${e.kind === 'bodyweight' ? 'BW' : ''}" aria-label="Weight">`}
+        <input id="ed-r-${ei}-${si}" data-in="ed-r" data-e="${ei}" data-s="${si}" inputmode="numeric" value="${s.r ?? ''}" aria-label="${e.timed ? 'Seconds' : 'Reps'}">
+        <button class="iconbtn" data-act="ed-rm-set" data-e="${ei}" data-s="${si}" aria-label="Remove set">✕</button></div>`).join('')}
+      <button class="btn ghost" data-act="ed-add-set" data-e="${ei}" style="align-self:flex-start">+ Add set</button></div>`).join('');
+  return `<div class="row between"><h2>Edit workout</h2><button class="iconbtn" data-act="ed-cancel" aria-label="Cancel editing">✕</button></div>
+    <div class="row">
+      <label class="field grow">Date<input id="ed-date" data-in="ed-date" type="date" value="${d.dateStr}" max="${localISO(Date.now())}"></label>
+      <label class="field grow">Duration (min)<input id="ed-dur" data-in="ed-dur" inputmode="numeric" value="${d.durMin}"></label>
+    </div>
+    ${exs || '<p class="small muted">No exercises. Add one below, or delete this workout instead.</p>'}
+    <div class="row"><label class="field grow">Add an exercise<select id="ed-add-sel">${lib.map(x => `<option value="${esc(x.id)}">${esc(x.name)}</option>`).join('')}</select></label>
+      <button class="btn" data-act="ed-add-ex" style="align-self:flex-end">Add</button></div>
+    ${d.msg ? `<p class="small" style="margin:0;color:var(--pr)">${esc(d.msg)}</p>` : ''}
+    <button class="btn primary lg block" data-act="ed-save">Save changes</button>
+    <button class="btn block" data-act="ed-cancel">Cancel</button>`;
+}
+function openEditor(id) {
+  const w = S.workouts.find(x => x.id === id); if (!w) return;
+  const d = JSON.parse(JSON.stringify(w));
+  d.dateStr = localISO(w.startedAt);
+  d.durMin = Math.max(1, Math.round(((w.endedAt || w.startedAt) - w.startedAt) / 60000));
+  S.sheet = {type: 'detail', id, edit: d}; disarm(); render();
+}
+function saveEditor() {
+  const d = S.sheet.edit, w = S.workouts.find(x => x.id === S.sheet.id); if (!w) return;
+  const exercises = d.exercises.map(e => ({...e, sets: e.sets.filter(s => s.r > 0).map(s => ({...s, done: true}))})).filter(e => e.sets.length);
+  if (!exercises.length) { d.msg = 'Add at least one set with reps, or delete the workout instead.'; render(); return; }
+  const dur = parseInt(d.durMin, 10);
+  if (!(dur > 0 && dur < 600)) { d.msg = 'Enter a duration in minutes, like 55.'; render(); return; }
+  const day = d.dateStr ? fromISO(d.dateStr) : startOfDay(w.startedAt);
+  const startedAt = day + (w.startedAt - startOfDay(w.startedAt));   // keep the original time of day
+  Object.assign(w, {exercises, startedAt, endedAt: startedAt + dur * 60000});
+  S.workouts.sort((a, b) => b.startedAt - a.startedAt);
+  store.saveWorkout(w);
+  recomputePRs();
+  S.sheet = {type: 'detail', id: w.id}; render(); toast('Workout updated');
+}
+// Records depend on every earlier workout, so recheck them all after an edit or delete.
+function recomputePRs() {
+  const best = {};
+  for (const w of [...S.workouts].sort((a, b) => a.startedAt - b.startedAt)) {
+    const prs = [];
+    for (const e of w.exercises) {
+      if (e.timed) continue;
+      let top = 0; for (const s of working(e)) top = Math.max(top, e1rm(conv(s.w, w.unit), s.r));
+      if (!top) continue;
+      if (e.exId in best && top > best[e.exId] + 0.01) prs.push(e.exId);
+      best[e.exId] = Math.max(best[e.exId] || 0, top);
+    }
+    if (JSON.stringify(prs) !== JSON.stringify(w.prs || [])) { w.prs = prs; store.saveWorkout(w); }
+  }
+}
 function todayWeighIn() {
   const pts = weightSeries(), last = pts[pts.length - 1];
   const done = S.body.some(e => e.kind === 'weight' && startOfDay(e.date) === startOfDay(Date.now()));
@@ -907,6 +974,8 @@ function viewSheet() {
     body = viewShareSheet();
   } else if (S.sheet.type === 'scan') {
     body = viewScanSheet();
+  } else if (S.sheet.type === 'detail' && S.sheet.edit) {
+    body = viewEditWorkout();
   } else if (S.sheet.type === 'detail') {
     const w = S.workouts.find(x => x.id === S.sheet.id); if (!w) { S.sheet = null; return ''; }
     const {v, sets} = volume(w);
@@ -915,7 +984,7 @@ function viewSheet() {
     body = `<div class="row between"><div class="stack"><p class="eyebrow">${fmtDate(w.startedAt)}</p><h2>${esc(w.routineName)}</h2></div><button class="iconbtn" data-act="sheet-close" aria-label="Close">✕</button></div>
       <div class="stats"><div class="stat"><b class="num">${fmtDur(((w.endedAt || w.startedAt) - w.startedAt) / 1000)}</b><span>Duration</span></div><div class="stat"><b class="num">${sets}</b><span>Sets</span></div><div class="stat"><b class="num">${fmtNum(v)}</b><span>Volume (${unit()})</span></div></div>
       ${figureBlock(w)}
-      <button class="btn primary block" data-act="share-open" data-v="${esc(w.id)}">Share workout</button>
+      <div class="row"><button class="btn primary grow" data-act="share-open" data-v="${esc(w.id)}">Share workout</button><button class="btn grow" data-act="ed-open" data-v="${esc(w.id)}">Edit workout</button></div>
       ${exs}
       <button class="btn danger block ${S.armed === 'del' + w.id ? 'armed' : ''}" data-act="del-workout" data-v="${esc(w.id)}">${S.armed === 'del' + w.id ? 'Tap again to delete' : 'Delete workout'}</button>`;
   }
@@ -1673,11 +1742,15 @@ const Comp = {
     if (this.ready || !fig.modelMeshes) return this.ready;
     const acc = {};
     for (const k of ['ra', 'la', 'tr', 'rl', 'll']) acc[k] = {y0: Infinity, y1: -Infinity, pts: []};
-    for (const mesh of fig.modelMeshes) {
-      if (!MUSCLE_GROUPS.includes(mesh.name)) continue;
+    // left and right split at the body's own midline (the average of all its paired muscles), not at x = 0
+    const muscles = fig.modelMeshes.filter(m => MUSCLE_GROUPS.includes(m.name));
+    let sum = 0, cnt = 0;
+    for (const m of muscles) { const a = m.geometry.attributes.position.array; for (let i = 0; i < a.length; i += 3) { sum += a[i]; cnt++; } }
+    const mid = this.mid = cnt ? sum / cnt : 0;
+    for (const mesh of muscles) {
       const pos = mesh.geometry.attributes.position, orig = Float32Array.from(pos.array), keys = new Array(pos.count);
       for (let i = 0; i < pos.count; i++) {
-        const x = orig[i * 3], y = orig[i * 3 + 1], z = orig[i * 3 + 2], k = segKeyOf(mesh.name, x);
+        const x = orig[i * 3], y = orig[i * 3 + 1], z = orig[i * 3 + 2], k = segKeyOf(mesh.name, x - mid);
         keys[i] = k; const a = acc[k]; a.pts.push(x, y, z);
         if (y < a.y0) a.y0 = y; if (y > a.y1) a.y1 = y;
       }
@@ -1707,17 +1780,44 @@ const Comp = {
         const vals = [...row].filter(v => v > 0).sort((p, q) => p - q), med = vals[vals.length >> 1] || 0;
         if (med) for (let b = 0; b < ANGLES; b++) row[b] = Math.min(row[b], med * 1.4);
       }
-      // fill gaps and smooth, around each ring and along the length
-      for (let pass = 0; pass < 3; pass++) for (let s = 0; s < n; s++) {
-        const row = r[s], mx = Math.max(...row) || 0.1, nx = new Float64Array(ANGLES);
+      // directions with no muscle (e.g. the front of the shin) blend between their nearest measured neighbours
+      for (const row of r) {
+        const have = []; for (let b = 0; b < ANGLES; b++) if (row[b] > 0) have.push(b);
+        if (!have.length) continue;
         for (let b = 0; b < ANGLES; b++) {
-          const v = row[b] || mx * 0.7, p = row[(b + ANGLES - 1) % ANGLES] || v, q = row[(b + 1) % ANGLES] || v;
+          if (row[b] > 0) continue;
+          let lo = b, hi = b, dl = 0, dh = 0;
+          while (!(row[lo] > 0)) { lo = (lo + ANGLES - 1) % ANGLES; dl++; }
+          while (!(row[hi] > 0)) { hi = (hi + 1) % ANGLES; dh++; }
+          row[b] = (row[lo] * dh + row[hi] * dl) / (dl + dh);
+        }
+      }
+      // smooth around each ring and along the length
+      for (let pass = 0; pass < 3; pass++) for (let s = 0; s < n; s++) {
+        const row = r[s], nx = new Float64Array(ANGLES), fallback = Math.max(...row) || 0.1;
+        for (let b = 0; b < ANGLES; b++) {
+          const v = row[b] || fallback, p = row[(b + ANGLES - 1) % ANGLES] || v, q = row[(b + 1) % ANGLES] || v;
           const up = s > 0 ? (r[s - 1][b] || v) : v, dn = s < n - 1 ? (r[s + 1][b] || v) : v;
           nx[b] = Math.max(v * 0.5 + (p + q) * 0.15 + (up + dn) * 0.1, v * 0.9);
         }
         r[s] = nx;
       }
       this.rings[k] = {y0: a.y0, y1: a.y1, cx, cz, r, si};
+    }
+    // The atlas is one real person, so its left and right limbs differ a little. Mirror-average each pair
+    // so any left/right difference on screen comes only from the scan's numbers.
+    for (const [rk, lk] of [['ra', 'la'], ['rl', 'll']]) {
+      const R = this.rings[rk], L = this.rings[lk];
+      const y0 = (R.y0 + L.y0) / 2, y1 = (R.y1 + L.y1) / 2, si = y => Math.max(0, Math.min(SLICES - 1, Math.floor((y - y0) / (y1 - y0) * SLICES)));
+      for (let s = 0; s < SLICES; s++) {
+        const mx = (L.cx[s] - R.cx[s]) / 2, mz = (L.cz[s] + R.cz[s]) / 2;
+        R.cx[s] = mid - mx; L.cx[s] = mid + mx; R.cz[s] = mz; L.cz[s] = mz;
+        for (let b = 0; b < ANGLES; b++) {
+          const mb = ((ANGLES / 2 - b) % ANGLES + ANGLES) % ANGLES, avg = (R.r[s][b] + L.r[s][mb]) / 2;
+          R.r[s][b] = avg; L.r[s][mb] = avg;
+        }
+      }
+      for (const X of [R, L]) { X.y0 = y0; X.y1 = y1; X.si = si; }
     }
     for (const p of this.parts) for (let i = 0; i < p.pos.count; i++) p.slice[i] = this.rings[p.keys[i]].si(p.orig[i * 3 + 1]);
     // shells: one lofted tube per region
@@ -1928,7 +2028,8 @@ const A = {
   finish: () => finishWorkout(),
   discard: () => { if (!arm('discard')) return; disarm(); discardWorkout(); },
   'sheet-close': () => { S.sheet = null; disarm(); render(); },
-  scrim: (d, ev) => { if (ev.target.classList.contains('scrim')) { S.sheet = null; disarm(); render(); } },
+  scrim: (d, ev) => { if (S.sheet && S.sheet.edit) return;   // don't drop unsaved edits on a stray tap
+    if (ev.target.classList.contains('scrim')) { S.sheet = null; disarm(); render(); } },
   'add-ex-open': () => { S.sheet = {type:'add-ex', q:''}; render(); },
   'add-ex': d => { const ex = libraryExercises().find(x => x.id === d.v); if (!ex) return; S.active.exercises.push(buildEx(ex)); S.sheet = null; saveActiveSoon(); render(); window.scrollTo(0, document.body.scrollHeight); },
   'add-custom': () => {
@@ -1938,7 +2039,19 @@ const A = {
     S.sheet = null; saveActiveSoon(); render(); window.scrollTo(0, document.body.scrollHeight);
   },
   detail: d => { S.sheet = {type:'detail', id:d.v}; render(); },
-  'del-workout': d => { if (!arm('del' + d.v)) return; disarm(); S.workouts = S.workouts.filter(w => w.id !== d.v); S.sheet = null; store.deleteWorkout(d.v); render(); toast('Workout deleted'); },
+  'del-workout': d => { if (!arm('del' + d.v)) return; disarm(); S.workouts = S.workouts.filter(w => w.id !== d.v); S.sheet = null; store.deleteWorkout(d.v); recomputePRs(); render(); toast('Workout deleted'); },
+  'ed-open': d => openEditor(d.v),
+  'ed-cancel': () => { S.sheet = {type: 'detail', id: S.sheet.id}; render(); },
+  'ed-save': () => saveEditor(),
+  'ed-warm': d => { const s = S.sheet.edit.exercises[+d.e].sets[+d.s]; s.warm = !s.warm; render(); },
+  'ed-add-set': d => { const e = S.sheet.edit.exercises[+d.e], l = e.sets[e.sets.length - 1]; e.sets.push({w: l ? l.w : null, r: null, done: true, warm: false}); render(); },
+  'ed-rm-set': d => { S.sheet.edit.exercises[+d.e].sets.splice(+d.s, 1); render(); },
+  'ed-rm-ex': d => { S.sheet.edit.exercises.splice(+d.e, 1); render(); },
+  'ed-add-ex': () => {
+    const x = libraryExercises().find(e => e.id === document.getElementById('ed-add-sel').value); if (!x) return;
+    S.sheet.edit.exercises.push({exId: x.id, name: x.name, kind: x.kind, muscle: x.muscle, repMin: x.repMin, repMax: x.repMax, rest: x.rest, timed: !!x.timed, target: x.sets, sets: [{w: null, r: null, done: true, warm: false}]});
+    render();
+  },
   'dismiss-summary': () => { S.summary = null; render(); },
   'sync-now': () => Sync.run(true),
   'share-open': d => { S.sheet = {type: 'share', id: d.v}; render(); prepareShare(); },
@@ -2017,6 +2130,11 @@ document.addEventListener('input', ev => {
     saveProgramSoon();
   } else if (k === 'auth-email') { S.authEmail = el.value;
   } else if (k === 'scan-idx') { showScan(+el.value);
+  } else if (k === 'ed-w' || k === 'ed-r') {
+    const s = S.sheet.edit.exercises[+el.dataset.e].sets[+el.dataset.s], t = el.value.trim().replace(',', '.');
+    const v = t === '' ? null : parseFloat(t); s[k === 'ed-w' ? 'w' : 'r'] = v == null || isNaN(v) ? null : (k === 'ed-r' ? Math.round(v) : v);
+  } else if (k === 'ed-date') { S.sheet.edit.dateStr = el.value;
+  } else if (k === 'ed-dur') { S.sheet.edit.durMin = el.value;
   } else if (k === 'goal-rate') { const n = parseFloat(el.value); if (n > 0 && n < 5) { S.profile.goal = {...(S.profile.goal || {type: 'cut'}), rate: n}; later('profile', () => store.saveProfile()); }
   } else if (k === 'bar') { const n = parseFloat(el.value); if (n >= 0) { S.profile.bar = n; later('profile', () => store.saveProfile()); } }
   else if (k === 'goal') { const n = parseInt(el.value, 10); if (n > 0 && n < 15) { S.profile.weeklyGoal = n; later('profile', () => store.saveProfile()); } }

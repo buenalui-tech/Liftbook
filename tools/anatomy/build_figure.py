@@ -190,6 +190,9 @@ for ob in built:
     for v in ob.data.vertices:
         mins = mathutils.Vector(map(min, mins, v.co)); maxs = mathutils.Vector(map(max, maxs, v.co))
 center = (mins + maxs) / 2
+# the bounding box is lopsided (the skeleton isn't symmetric), so center left/right on the paired muscles instead
+mv = [v.co.x for ob in built if ob.name in GROUPS for v in ob.data.vertices]
+center.x = sum(mv) / len(mv)
 height = maxs.z - mins.z
 scale = 18.0 / height   # same units as the mannequin: 18 tall
 for ob in built:
