@@ -96,6 +96,17 @@ h3{font-family:var(--display);font-weight:600;font-size:20px;line-height:1.1;mar
 .day i{width:30px;height:30px;border-radius:50%;border:2px solid var(--line);display:grid;place-items:center;font-style:normal;font-weight:600;color:var(--ink);font-size:13px}
 .day.done i{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
 .day.today i{border-color:var(--accent)}
+button.day{background:none;border:0;padding:0;font:inherit;color:var(--muted);cursor:pointer}
+button.day:disabled{opacity:.35;cursor:default}
+.day.act i{border-color:var(--good);border-style:dashed}
+.day.sel{color:var(--ink);font-weight:700}
+.day.sel i{box-shadow:0 0 0 3px var(--bg),0 0 0 5px var(--ink)}
+.daynav{display:flex;align-items:center;justify-content:space-between;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:6px}
+.daynav .iconbtn{font-size:26px;width:44px;height:44px;color:var(--ink)}
+.daynav .iconbtn:disabled{opacity:.25}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chipbtn{border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:7px 14px;font-weight:600;font-size:14px}
+.chipbtn[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
 
 /* up next */
 .next{border:2px solid var(--accent)}
@@ -794,36 +805,136 @@ function storageBanner() {
   return '';
 }
 
+const ACTIVITIES = [['run', 'Run'], ['walk', 'Walk'], ['cycle', 'Cycle'], ['swim', 'Swim'], ['hike', 'Hike'], ['row', 'Row'],
+  ['sport', 'Sport'], ['yoga', 'Yoga'], ['hiit', 'HIIT'], ['other', 'Other']];
+const HAS_DISTANCE = new Set(['run', 'walk', 'cycle', 'swim', 'hike', 'row']);
+const isActivity = w => w.kind === 'activity';
+const distUnit = () => unit() === 'kg' ? 'km' : 'mi';
+function entrySummary(w) {
+  const dur = fmtDur(((w.endedAt || w.startedAt) - w.startedAt) / 1000);
+  if (isActivity(w)) return [dur, w.distance ? `${fmtW(w.distance)} ${w.distUnit || distUnit()}` : '', w.calories ? `${fmtNum(w.calories)} kcal` : '', w.hr ? `${w.hr} bpm avg` : ''].filter(Boolean);
+  const {v, sets} = volume(w);
+  return [dur, `${sets} sets`, `${fmtNum(v)} ${unit()}`];
+}
+function entryCard(w) {
+  const prs = (w.prs || []).length;
+  return `<button class="hitem" data-act="detail" data-v="${esc(w.id)}">
+    <div class="row between" style="width:100%"><h3>${esc(w.routineName)}</h3>
+      <span class="row" style="gap:6px">${isActivity(w) ? '<span class="chip">Activity</span>' : ''}${prs ? `<span class="chip pr">${prs} PR${prs > 1 ? 's' : ''}</span>` : ''}</span></div>
+    <div class="kv num">${entrySummary(w).map((x, i) => i ? `<span>${esc(x)}</span>` : `<span><b>${esc(x)}</b></span>`).join('')}</div>
+    ${isActivity(w) ? (w.notes ? `<div class="small muted">${esc(w.notes)}</div>` : '') : `<div class="small muted">${w.exercises.map(e => esc(e.name.replace(/ \(.*\)$/, ''))).join(' · ')}</div>`}</button>`;
+}
 function viewToday() {
-  const now = Date.now(), wk = startOfWeek(now);
-  const doneDays = new Set(S.workouts.filter(w => w.startedAt >= wk).map(w => startOfDay(w.startedAt)));
+  const now = Date.now(), today = startOfDay(now);
+  if (!S.day || S.day > today) S.day = today;
+  const day = S.day, isToday = day === today, wk = startOfWeek(day);
+  const kinds = {};
+  for (const w of S.workouts) { const d = startOfDay(w.startedAt); (kinds[d] = kinds[d] || new Set()).add(isActivity(w) ? 'a' : 's'); }
   const days = ['M','T','W','T','F','S','S'].map((d, i) => {
-    const t = wk + i * DAY, on = doneDays.has(t), today = t === startOfDay(now);
-    return `<div class="day ${on ? 'done' : ''} ${today ? 'today' : ''}"><i>${new Date(t).getDate()}</i>${d}</div>`;
+    const t = wk + i * DAY, k = kinds[t] || new Set(), future = t > today;
+    return `<button class="day ${k.has('s') ? 'done' : ''} ${k.has('a') && !k.has('s') ? 'act' : ''} ${t === today ? 'today' : ''} ${t === day ? 'sel' : ''}" data-act="day" data-v="${t}" ${future ? 'disabled' : ''} aria-label="${new Date(t).toDateString()}"><i>${new Date(t).getDate()}</i>${d}</button>`;
   }).join('');
-  const nr = nextRoutine();
-  const plan = nr ? nr.exercises.map(ex => {
-    const s = suggest(ex);
-    const tgt = `${ex.sets} × ${rangeText(ex)}${ex.timed ? 's' : ''}`;
-    return `<li><span class="nm">${esc(ex.name)}</span><span class="tg num">${tgt}</span><span class="ht ${s.tone}">${s.w != null ? `<b>${fmtW(s.w)} ${unit()}</b> · ` : ''}${esc(s.text)}</span></li>`;
-  }).join('') : '';
-  const others = S.program.routines.filter(r => !nr || r.id !== nr.id).map(r => `
-    <div class="routine-row"><span class="tag">${esc(r.tag || r.name.slice(0,2).toUpperCase())}</span>
-      <div class="grow"><div style="font-weight:600">${esc(r.name)}</div><div class="small muted">${esc(r.focus || '')} · ${r.exercises.length} exercises</div></div>
-      <button class="btn" data-act="start" data-v="${esc(r.id)}">Start</button></div>`).join('');
-  const count = doneDays.size, goal = S.profile.weeklyGoal || 4;
+  const strengthThisWeek = Object.entries(kinds).filter(([t, k]) => +t >= startOfWeek(today) && k.has('s')).length, goal = S.profile.weeklyGoal || 4;
+  const entries = S.workouts.filter(w => startOfDay(w.startedAt) === day).sort((a, b) => a.startedAt - b.startedAt);
+  const label = isToday ? 'Today' : day === today - DAY ? 'Yesterday' : new Date(day).toLocaleDateString(undefined, {weekday: 'long'});
+  const nav = `<div class="daynav">
+      <button class="iconbtn" data-act="day-step" data-v="-1" aria-label="Previous day">‹</button>
+      <div class="stack" style="gap:0;text-align:center"><b>${label}</b><span class="small muted">${new Date(day).toLocaleDateString(undefined, {month: 'long', day: 'numeric', year: day < today - 300 * DAY ? 'numeric' : undefined})}</span></div>
+      <button class="iconbtn" data-act="day-step" data-v="1" aria-label="Next day" ${isToday ? 'disabled' : ''}>›</button></div>`;
+  const logged = entries.length ? `<section class="section"><p class="eyebrow">${isToday ? 'Logged today' : 'Logged'}</p><div class="hist">${entries.map(entryCard).join('')}</div></section>`
+    : (!isToday ? `<div class="empty">Rest day. Nothing logged on ${new Date(day).toLocaleDateString(undefined, {weekday: 'long'})}.</div>` : '');
+  const logBtn = `<button class="btn block" data-act="log-open">+ Log ${isToday ? 'an activity or custom workout' : 'something for this day'}</button>`;
+  let plan = '';
+  if (isToday) {
+    const nr = nextRoutine();
+    const list = nr ? nr.exercises.map(ex => {
+      const s = suggest(ex), tgt = `${ex.sets} × ${rangeText(ex)}${ex.timed ? 's' : ''}`;
+      return `<li><span class="nm">${esc(ex.name)}</span><span class="tg num">${tgt}</span><span class="ht ${s.tone}">${s.w != null ? `<b>${fmtW(s.w)} ${unit()}</b> · ` : ''}${esc(s.text)}</span></li>`;
+    }).join('') : '';
+    const others = S.program.routines.filter(r => !nr || r.id !== nr.id).map(r => `
+      <div class="routine-row"><span class="tag">${esc(r.tag || r.name.slice(0,2).toUpperCase())}</span>
+        <div class="grow"><div style="font-weight:600">${esc(r.name)}</div><div class="small muted">${esc(r.focus || '')} · ${r.exercises.length} exercises</div></div>
+        <button class="btn" data-act="start" data-v="${esc(r.id)}">Start</button></div>`).join('');
+    plan = `${nr ? `<section class="card next">
+        <div class="row between"><div class="stack"><p class="eyebrow">Up next · ${esc(nr.focus || '')}</p><h2>${esc(nr.name)}</h2></div><span class="tag">${esc(nr.tag || '')}</span></div>
+        <ul class="plan">${list}</ul>
+        <button class="btn primary lg block" data-act="start" data-v="${esc(nr.id)}">${S.active ? 'Resume workout' : `Start ${esc(nr.name)}`}</button>
+      </section>` : `<div class="empty">Add a routine in the Program tab to get started.</div>`}
+      ${others ? `<section class="section"><p class="eyebrow">Other days</p><div class="card" style="padding-block:4px">${others}</div></section>` : ''}`;
+  }
+  const weigh = S.body.find(e => e.kind === 'weight' && startOfDay(e.date) === day);
   return `${brand(new Date().toLocaleDateString(undefined, {weekday:'long', month:'long', day:'numeric'}))}
     ${storageBanner()}
-    ${summaryCard()}
-    <section class="section"><div class="row between"><p class="eyebrow">This week</p><span class="small muted num">${count} of ${goal} sessions</span></div><div class="week">${days}</div></section>
-    ${todayWeighIn()}
-    ${nr ? `<section class="card next">
-      <div class="row between"><div class="stack"><p class="eyebrow">Up next · ${esc(nr.focus || '')}</p><h2>${esc(nr.name)}</h2></div><span class="tag">${esc(nr.tag || '')}</span></div>
-      <ul class="plan">${plan}</ul>
-      <button class="btn primary lg block" data-act="start" data-v="${esc(nr.id)}">${S.active ? 'Resume workout' : `Start ${esc(nr.name)}`}</button>
-    </section>` : `<div class="empty">Add a routine in the Program tab to get started.</div>`}
-    ${others ? `<section class="section"><p class="eyebrow">Other days</p><div class="card" style="padding-block:4px">${others}</div></section>` : ''}
-    <p class="small muted">${esc(S.program.name)} · double progression: work up to the top of the rep range on every set, then add weight.</p>`;
+    ${isToday ? summaryCard() : ''}
+    <section class="section" id="day-swipe">
+      <div class="row between"><p class="eyebrow">${wk === startOfWeek(today) ? 'This week' : 'Week of ' + new Date(wk).toLocaleDateString(undefined, {month: 'short', day: 'numeric'})}</p><span class="small muted num">${strengthThisWeek} of ${goal} lifting sessions this week</span></div>
+      <div class="week">${days}</div>
+      ${nav}
+    </section>
+    ${isToday ? todayWeighIn() : (weigh ? `<button class="hitem weigh" data-act="tab" data-v="body"><span class="row between" style="width:100%"><span class="small muted">Weigh-in</span><b class="num">${f1(conv(weigh.w, weigh.unit))} ${unit()}</b></span></button>` : '')}
+    ${logged}
+    ${logBtn}
+    ${plan}
+    ${isToday ? `<p class="small muted">${esc(S.program.name)} · double progression: work up to the top of the rep range on every set, then add weight.</p>` : ''}`;
+}
+
+/* ---------- logging activities and custom workouts ---------- */
+function viewLogSheet() {
+  const sh = S.sheet, today = startOfDay(Date.now());
+  if (!sh.form) {
+    const live = sh.day === today;
+    return `<div class="row between"><h2>Log ${sh.day === today ? 'for today' : 'for ' + fmtDate(sh.day)}</h2><button class="iconbtn" data-act="sheet-close" aria-label="Close">✕</button></div>
+      <button class="hitem" data-act="log-activity"><h3>Activity</h3><span class="small muted">Run, walk, cycle, swim, sport, yoga and more. Time, distance, calories, heart rate.</span></button>
+      <button class="hitem" data-act="log-strength"><h3>Custom strength workout</h3><span class="small muted">${live ? (S.active ? 'You already have a workout in progress. Finish it first.' : 'Start a live session and add any exercises as you go.') : 'Enter the exercises and sets you did that day.'}</span></button>`;
+  }
+  const f = sh.form, du = f.distUnit || distUnit();
+  return `<div class="row between"><h2>${f.id ? 'Edit activity' : 'Log activity'}</h2><button class="iconbtn" data-act="sheet-close" aria-label="Close">✕</button></div>
+    <div class="chips" role="group" aria-label="Activity type">${ACTIVITIES.map(([k, l]) => `<button class="chipbtn" data-act="act-type" data-v="${k}" aria-pressed="${f.type === k}">${l}</button>`).join('')}</div>
+    ${f.type === 'sport' || f.type === 'other' ? `<label class="field">Name<input id="act-name" data-in="act" data-f="name" value="${esc(f.name || '')}" placeholder="${f.type === 'sport' ? 'Basketball' : 'Stretching'}"></label>` : ''}
+    <div class="row">
+      <label class="field grow">Date<input id="act-date" type="date" data-in="act" data-f="dateStr" value="${f.dateStr}" max="${localISO(Date.now())}"></label>
+      <label class="field grow">Duration (min)<input id="act-dur" data-in="act" data-f="dur" inputmode="numeric" value="${esc(f.dur || '')}" placeholder="30"></label>
+    </div>
+    ${HAS_DISTANCE.has(f.type) ? `<label class="field">Distance (${du})<input id="act-dist" data-in="act" data-f="distance" inputmode="decimal" value="${esc(f.distance ?? '')}" placeholder="${f.type === 'cycle' ? '12' : '3.1'}"></label>` : ''}
+    <div class="row">
+      <label class="field grow">Calories (optional)<input id="act-cal" data-in="act" data-f="calories" inputmode="numeric" value="${esc(f.calories ?? '')}"></label>
+      <label class="field grow">Avg heart rate (optional)<input id="act-hr" data-in="act" data-f="hr" inputmode="numeric" value="${esc(f.hr ?? '')}"></label>
+    </div>
+    <label class="field">Notes (optional)<input id="act-notes" data-in="act" data-f="notes" value="${esc(f.notes || '')}" placeholder="Easy zone 2, felt good"></label>
+    ${f.msg ? `<p class="small" style="margin:0;color:var(--pr)">${esc(f.msg)}</p>` : ''}
+    <button class="btn primary lg block" data-act="act-save">${f.id ? 'Save changes' : 'Save activity'}</button>
+    ${f.id ? `<button class="btn danger block ${S.armed === 'del' + f.id ? 'armed' : ''}" data-act="del-workout" data-v="${esc(f.id)}">${S.armed === 'del' + f.id ? 'Tap again to delete' : 'Delete activity'}</button>` : ''}`;
+}
+function activityForm(day, w) {
+  if (w) return {id: w.id, type: w.type, name: w.type === 'sport' || w.type === 'other' ? w.routineName : '', dateStr: localISO(w.startedAt),
+    dur: String(Math.round((w.endedAt - w.startedAt) / 60000)), distance: w.distance ?? '', distUnit: w.distUnit, calories: w.calories ?? '', hr: w.hr ?? '', notes: w.notes || ''};
+  return {type: 'run', dateStr: localISO(day), dur: '', distance: '', calories: '', hr: '', notes: ''};
+}
+function saveActivity() {
+  const f = S.sheet.form, num = v => { const n = parseFloat(String(v ?? '').replace(',', '.')); return isNaN(n) ? null : n; };
+  const dur = num(f.dur);
+  if (!(dur > 0 && dur < 1440)) { f.msg = 'Enter how many minutes it took, like 45.'; render(); return; }
+  const dist = HAS_DISTANCE.has(f.type) ? num(f.distance) : null, cal = num(f.calories), hr = num(f.hr);
+  if ([dist, cal, hr].some(v => v != null && v < 0)) { f.msg = 'Numbers can’t be negative.'; render(); return; }
+  const label = (ACTIVITIES.find(a => a[0] === f.type) || [, 'Activity'])[1];
+  const day = f.dateStr ? fromISO(f.dateStr) : startOfDay(Date.now());
+  const existing = f.id ? S.workouts.find(w => w.id === f.id) : null;
+  // keep the time of day when editing; new entries use now (today) or midday (a past day)
+  const startedAt = existing ? day + (existing.startedAt - startOfDay(existing.startedAt))
+    : (day === startOfDay(Date.now()) ? Date.now() - dur * 60000 : day + 12 * 3600000);
+  const w = existing || {id: newId(), kind: 'activity', exercises: [], unit: unit()};
+  Object.assign(w, {type: f.type, routineName: (f.type === 'sport' || f.type === 'other') && f.name.trim() ? f.name.trim() : label,
+    startedAt, endedAt: startedAt + dur * 60000, distance: dist, distUnit: f.distUnit || distUnit(), calories: cal, hr: hr ? Math.round(hr) : null, notes: f.notes.trim()});
+  if (!existing) S.workouts.push(w);
+  S.workouts.sort((a, b) => b.startedAt - a.startedAt);
+  store.saveWorkout(w);
+  S.sheet = null; S.day = startOfDay(w.startedAt); render(); toast(existing ? 'Activity updated' : `${w.routineName} logged`);
+}
+function startCustomWorkout() {
+  if (S.active) { toast('Finish or discard the workout in progress first.'); return; }
+  S.active = {id: newId(), routineId: null, routineName: 'Custom workout', unit: unit(), startedAt: Date.now(), exercises: []};
+  S.sheet = {type: 'add-ex', q: ''}; S.screen = 'workout';
+  store.saveActive(); render(); wake();
 }
 /* ---------- editing a finished workout ---------- */
 function viewEditWorkout() {
@@ -838,7 +949,8 @@ function viewEditWorkout() {
         <input id="ed-r-${ei}-${si}" data-in="ed-r" data-e="${ei}" data-s="${si}" inputmode="numeric" value="${s.r ?? ''}" aria-label="${e.timed ? 'Seconds' : 'Reps'}">
         <button class="iconbtn" data-act="ed-rm-set" data-e="${ei}" data-s="${si}" aria-label="Remove set">✕</button></div>`).join('')}
       <button class="btn ghost" data-act="ed-add-set" data-e="${ei}" style="align-self:flex-start">+ Add set</button></div>`).join('');
-  return `<div class="row between"><h2>Edit workout</h2><button class="iconbtn" data-act="ed-cancel" aria-label="Cancel editing">✕</button></div>
+  return `<div class="row between"><h2>${d.isNew ? 'Log workout' : 'Edit workout'}</h2><button class="iconbtn" data-act="ed-cancel" aria-label="Cancel editing">✕</button></div>
+    ${d.isNew ? `<label class="field">Name<input id="ed-name" data-in="ed-name" value="${esc(d.routineName)}"></label>` : ''}
     <div class="row">
       <label class="field grow">Date<input id="ed-date" data-in="ed-date" type="date" value="${d.dateStr}" max="${localISO(Date.now())}"></label>
       <label class="field grow">Duration (min)<input id="ed-dur" data-in="ed-dur" inputmode="numeric" value="${d.durMin}"></label>
@@ -857,8 +969,16 @@ function openEditor(id) {
   d.durMin = Math.max(1, Math.round(((w.endedAt || w.startedAt) - w.startedAt) / 60000));
   S.sheet = {type: 'detail', id, edit: d}; disarm(); render();
 }
+function newWorkoutEditor(day) {
+  const d = {id: newId(), routineId: null, routineName: 'Custom workout', unit: unit(), startedAt: day + 17 * 3600000, exercises: [], isNew: true,
+    dateStr: localISO(day), durMin: '60'};
+  S.sheet = {type: 'detail', id: d.id, edit: d}; disarm(); render();
+}
 function saveEditor() {
-  const d = S.sheet.edit, w = S.workouts.find(x => x.id === S.sheet.id); if (!w) return;
+  const d = S.sheet.edit;
+  let w = S.workouts.find(x => x.id === S.sheet.id);
+  if (!w && d.isNew) w = {id: d.id, routineId: null, routineName: (d.routineName || '').trim() || 'Custom workout', unit: d.unit, startedAt: d.startedAt, exercises: []};
+  if (!w) return;
   const exercises = d.exercises.map(e => ({...e, sets: e.sets.filter(s => s.r > 0).map(s => ({...s, done: true}))})).filter(e => e.sets.length);
   if (!exercises.length) { d.msg = 'Add at least one set with reps, or delete the workout instead.'; render(); return; }
   const dur = parseInt(d.durMin, 10);
@@ -866,10 +986,11 @@ function saveEditor() {
   const day = d.dateStr ? fromISO(d.dateStr) : startOfDay(w.startedAt);
   const startedAt = day + (w.startedAt - startOfDay(w.startedAt));   // keep the original time of day
   Object.assign(w, {exercises, startedAt, endedAt: startedAt + dur * 60000});
+  if (d.isNew) { w.routineName = (d.routineName || '').trim() || 'Custom workout'; S.workouts.push(w); }
   S.workouts.sort((a, b) => b.startedAt - a.startedAt);
   store.saveWorkout(w);
   recomputePRs();
-  S.sheet = {type: 'detail', id: w.id}; render(); toast('Workout updated');
+  S.sheet = {type: 'detail', id: w.id}; S.day = startOfDay(w.startedAt); render(); toast(d.isNew ? 'Workout logged' : 'Workout updated');
 }
 // Records depend on every earlier workout, so recheck them all after an edit or delete.
 function recomputePRs() {
@@ -976,6 +1097,18 @@ function viewSheet() {
     body = viewScanSheet();
   } else if (S.sheet.type === 'detail' && S.sheet.edit) {
     body = viewEditWorkout();
+  } else if (S.sheet.type === 'log') {
+    body = viewLogSheet();
+  } else if (S.sheet.type === 'detail' && (S.workouts.find(x => x.id === S.sheet.id) || {}).kind === 'activity') {
+    const w = S.workouts.find(x => x.id === S.sheet.id);
+    body = `<div class="row between"><div class="stack"><p class="eyebrow">${fmtDate(w.startedAt)} · Activity</p><h2>${esc(w.routineName)}</h2></div><button class="iconbtn" data-act="sheet-close" aria-label="Close">✕</button></div>
+      <div class="stats">${[['Duration', fmtDur((w.endedAt - w.startedAt) / 1000)], w.distance ? ['Distance', `${fmtW(w.distance)} ${w.distUnit}`] : null,
+        w.distance && HAS_DISTANCE.has(w.type) && w.type !== 'cycle' && w.type !== 'swim' ? ['Pace', `${fmtDur((w.endedAt - w.startedAt) / 1000 / w.distance)}/${w.distUnit}`] : null,
+        w.calories ? ['Calories', fmtNum(w.calories)] : null, w.hr ? ['Avg HR', `${w.hr} bpm`] : null].filter(Boolean).slice(0, 3)
+        .map(([k, v]) => `<div class="stat"><b class="num">${esc(v)}</b><span>${k}</span></div>`).join('')}</div>
+      ${w.notes ? `<p style="margin:0">${esc(w.notes)}</p>` : ''}
+      <button class="btn block" data-act="act-edit" data-v="${esc(w.id)}">Edit activity</button>
+      <button class="btn danger block ${S.armed === 'del' + w.id ? 'armed' : ''}" data-act="del-workout" data-v="${esc(w.id)}">${S.armed === 'del' + w.id ? 'Tap again to delete' : 'Delete activity'}</button>`;
   } else if (S.sheet.type === 'detail') {
     const w = S.workouts.find(x => x.id === S.sheet.id); if (!w) { S.sheet = null; return ''; }
     const {v, sets} = volume(w);
@@ -997,6 +1130,7 @@ function viewHistory() {
   for (const w of S.workouts) {
     const m = new Date(w.startedAt).toLocaleDateString(undefined, {month:'long', year:'numeric'});
     if (m !== month) { out += `<p class="eyebrow" style="margin-top:8px">${m}</p>`; month = m; }
+    if (isActivity(w)) { out += entryCard(w); continue; }
     const {v, sets} = volume(w), prs = (w.prs || []).length;
     out += `<button class="hitem" data-act="detail" data-v="${esc(w.id)}">
       <div class="row between" style="width:100%"><h3>${esc(w.routineName)}</h3>${prs ? `<span class="chip pr">${prs} PR${prs > 1 ? 's' : ''}</span>` : ''}</div>
@@ -2041,7 +2175,15 @@ const A = {
   detail: d => { S.sheet = {type:'detail', id:d.v}; render(); },
   'del-workout': d => { if (!arm('del' + d.v)) return; disarm(); S.workouts = S.workouts.filter(w => w.id !== d.v); S.sheet = null; store.deleteWorkout(d.v); recomputePRs(); render(); toast('Workout deleted'); },
   'ed-open': d => openEditor(d.v),
-  'ed-cancel': () => { S.sheet = {type: 'detail', id: S.sheet.id}; render(); },
+  day: d => { S.day = +d.v; render(); },
+  'day-step': d => stepDay(+d.v),
+  'log-open': () => { S.sheet = {type: 'log', day: S.day || startOfDay(Date.now())}; render(); },
+  'log-activity': () => { S.sheet.form = activityForm(S.sheet.day); render(); },
+  'log-strength': () => { const day = S.sheet.day; if (day === startOfDay(Date.now())) startCustomWorkout(); else newWorkoutEditor(day); },
+  'act-type': d => { S.sheet.form.type = d.v; S.sheet.form.msg = ''; render(); },
+  'act-save': () => saveActivity(),
+  'act-edit': d => { const w = S.workouts.find(x => x.id === d.v); S.sheet = {type: 'log', day: startOfDay(w.startedAt), form: activityForm(null, w)}; render(); },
+  'ed-cancel': () => { S.sheet = S.sheet.edit && S.sheet.edit.isNew ? null : {type: 'detail', id: S.sheet.id}; render(); },
   'ed-save': () => saveEditor(),
   'ed-warm': d => { const s = S.sheet.edit.exercises[+d.e].sets[+d.s]; s.warm = !s.warm; render(); },
   'ed-add-set': d => { const e = S.sheet.edit.exercises[+d.e], l = e.sets[e.sets.length - 1]; e.sets.push({w: l ? l.w : null, r: null, done: true, warm: false}); render(); },
@@ -2075,7 +2217,10 @@ const A = {
   'export-json': () => offerFile(`liftbook-backup-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify({app:'liftbook', version:1, exportedAt:new Date().toISOString(), profile:S.profile, program:S.program, workouts:S.workouts, body:S.body}, null, 2)),
   'export-csv': () => {
     const rows = [['date','routine','exercise','set','warmup','weight','unit','reps_or_seconds']];
-    for (const w of [...S.workouts].reverse()) for (const e of w.exercises) e.sets.forEach((s, i) => rows.push([new Date(w.startedAt).toISOString(), w.routineName, e.name, i + 1, s.warm ? 1 : 0, s.w ?? '', w.unit, s.r ?? '']));
+    for (const w of [...S.workouts].reverse()) {
+      if (isActivity(w)) { rows.push([new Date(w.startedAt).toISOString(), w.routineName, `activity: ${w.type}`, '', '', w.distance ?? '', w.distance ? w.distUnit : '', Math.round((w.endedAt - w.startedAt) / 1000)]); continue; }
+      for (const e of w.exercises) e.sets.forEach((s, i) => rows.push([new Date(w.startedAt).toISOString(), w.routineName, e.name, i + 1, s.warm ? 1 : 0, s.w ?? '', w.unit, s.r ?? '']));
+    }
     offerFile(`liftbook-sets-${new Date().toISOString().slice(0, 10)}.csv`, rows.map(r => r.map(c => /[",\n]/.test(String(c)) ? `"${String(c).replace(/"/g, '""')}"` : c).join(',')).join('\n'));
   }
 };
@@ -2134,6 +2279,8 @@ document.addEventListener('input', ev => {
     const s = S.sheet.edit.exercises[+el.dataset.e].sets[+el.dataset.s], t = el.value.trim().replace(',', '.');
     const v = t === '' ? null : parseFloat(t); s[k === 'ed-w' ? 'w' : 'r'] = v == null || isNaN(v) ? null : (k === 'ed-r' ? Math.round(v) : v);
   } else if (k === 'ed-date') { S.sheet.edit.dateStr = el.value;
+  } else if (k === 'ed-name') { S.sheet.edit.routineName = el.value;
+  } else if (k === 'act') { S.sheet.form[el.dataset.f] = el.value;
   } else if (k === 'ed-dur') { S.sheet.edit.durMin = el.value;
   } else if (k === 'goal-rate') { const n = parseFloat(el.value); if (n > 0 && n < 5) { S.profile.goal = {...(S.profile.goal || {type: 'cut'}), rate: n}; later('profile', () => store.saveProfile()); }
   } else if (k === 'bar') { const n = parseFloat(el.value); if (n >= 0) { S.profile.bar = n; later('profile', () => store.saveProfile()); } }
@@ -2153,6 +2300,22 @@ document.addEventListener('submit', ev => {
   if (id === 'wt-form') logWeight();
   if (id === 'scan-form') saveScanForm();
 });
+function stepDay(n) {
+  const today = startOfDay(Date.now()), next = startOfDay((S.day || today) + n * DAY + 12 * 3600000);
+  if (next > today) return;
+  S.day = next; render();
+}
+// swipe left/right anywhere on the Today tab (outside the 3D figure) to move between days
+let swipe = null;
+document.addEventListener('touchstart', ev => {
+  if (S.tab !== 'today' || S.screen !== 'tabs' || S.sheet || ev.touches.length !== 1 || ev.target.closest('.fig-host, input, select')) { swipe = null; return; }
+  swipe = {x: ev.touches[0].clientX, y: ev.touches[0].clientY};
+}, {passive: true});
+document.addEventListener('touchend', ev => {
+  if (!swipe) return;
+  const t = ev.changedTouches[0], dx = t.clientX - swipe.x, dy = t.clientY - swipe.y; swipe = null;
+  if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.5) stepDay(dx < 0 ? 1 : -1);
+}, {passive: true});
 document.addEventListener('toggle', ev => { if (ev.target.id === 'wt-details') S.wtOpen = ev.target.open; }, true);
 async function importFile(file) {
   try {
