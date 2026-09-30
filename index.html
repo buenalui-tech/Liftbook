@@ -171,6 +171,7 @@ h3{font-family:var(--display);font-weight:600;font-size:20px;line-height:1.1;mar
 /* sheet */
 .scrim{position:fixed;inset:0;z-index:9;background:rgba(8,12,18,.5);display:flex;align-items:flex-end;justify-content:center}
 .sheet{background:var(--surface);width:100%;max-width:560px;max-height:88%;overflow:auto;border-radius:16px 16px 0 0;padding:18px 16px calc(18px + env(safe-area-inset-bottom,0px));display:flex;flex-direction:column;gap:14px}
+.sheet>*{flex-shrink:0}
 .field{display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--muted);font-weight:600}
 .field input,.field select{height:44px;border:1px solid var(--line);border-radius:8px;background:var(--sunk);padding:0 10px;font-size:16px;font-weight:500;color:var(--ink)}
 .lib{display:flex;flex-direction:column;max-height:260px;overflow:auto;border:1px solid var(--line);border-radius:10px}
@@ -264,6 +265,14 @@ details summary{cursor:pointer;padding-block:6px}
 .scan-seg input{width:100%;height:40px;border:1px solid var(--line);border-radius:8px;background:var(--sunk);text-align:center;font-size:16px}
 .scan-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
 input[type=range]{width:100%;accent-color:var(--accent)}
+/* muscle map + share */
+.fig-wrap{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px;align-items:center}
+@media (max-width:360px){.fig-wrap{grid-template-columns:1fr}}
+.fig-host{height:300px;display:flex;border-radius:10px;background:var(--sunk)}
+.fig-canvas{width:100%;height:100%;display:block;touch-action:none;cursor:grab}
+.main-sw{background:var(--lean)} .also-sw{background:#F2A0A5}
+.share-preview{display:flex;justify-content:center;align-items:center;min-height:320px;background:var(--sunk);border-radius:12px;padding:12px}
+.share-preview img{max-height:62vh;width:auto;max-width:100%;border-radius:10px;box-shadow:0 4px 18px rgba(0,0,0,.18);-webkit-touch-callout:default}
 .toast{position:fixed;left:50%;transform:translateX(-50%);top:calc(12px + env(safe-area-inset-top,0px));z-index:20;background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:10px;font-weight:600;font-size:14px;max-width:calc(100% - 32px)}
 @media (prefers-reduced-motion: no-preference){.set.done{transition:background .2s}.rest .fill{transition:width .25s linear}}
 </style>
@@ -760,6 +769,7 @@ function render() {
   for (const [id, v] of Object.entries(keep)) { const el = document.getElementById(id); if (el) el.value = v; }
   if (focused) { const el = document.getElementById(focused); if (el && el.tagName === 'INPUT' && el.type !== 'range') el.focus({preventScroll: true}); }
   shownScan = null;
+  Fig.attach();
 }
 function viewTabs() {
   const t = (id, label, icon) => `<button data-act="tab" data-v="${id}" ${S.tab === id ? 'aria-current="page"' : ''}>${ICON[icon]}<span>${label}</span></button>`;
@@ -824,6 +834,8 @@ function summaryCard() {
     <div class="row between"><div class="stack"><p class="eyebrow">Workout saved</p><h2>${esc(w.routineName)} done</h2></div><button class="iconbtn" data-act="dismiss-summary" aria-label="Dismiss">✕</button></div>
     <div class="stats"><div class="stat"><b class="num">${fmtDur((w.endedAt - w.startedAt) / 1000)}</b><span>Duration</span></div><div class="stat"><b class="num">${sets}</b><span>Working sets</span></div><div class="stat"><b class="num">${fmtNum(v)}</b><span>Volume (${unit()})</span></div></div>
     ${prs ? `<p class="eyebrow" style="color:var(--pr)">New personal records</p><div class="prlist">${prs}</div>` : `<p class="small muted">No new records this time. Next session's targets are updated below.</p>`}
+    ${figureBlock(w)}
+    <button class="btn primary block" data-act="share-open" data-v="${esc(w.id)}">Share workout</button>
   </section>`;
 }
 
@@ -890,6 +902,8 @@ function viewSheet() {
       <div class="lib">${lib.map(x => `<button data-act="add-ex" data-v="${esc(x.id)}"><span>${esc(x.name)}</span><span class="muted small">${esc(x.muscle || '')}</span></button>`).join('') || '<div class="muted small" style="padding:12px">No match in your library.</div>'}</div>
       ${q ? `<div class="row"><label class="field grow">Muscle<select id="add-m">${MUSCLES.map(m => `<option>${m}</option>`).join('')}</select></label><label class="field grow">Equipment<select id="add-k">${KINDS.map(k => `<option>${k}</option>`).join('')}</select></label></div>
       <button class="btn primary block" data-act="add-custom">Add “${esc(S.sheet.q)}” as a new exercise</button>` : ''}`;
+  } else if (S.sheet.type === 'share') {
+    body = viewShareSheet();
   } else if (S.sheet.type === 'scan') {
     body = viewScanSheet();
   } else if (S.sheet.type === 'detail') {
@@ -899,6 +913,8 @@ function viewSheet() {
       <table class="dtable num"><tbody>${e.sets.map((s, i) => `<tr><td class="muted">${s.warm ? 'Warm-up' : 'Set ' + (i + 1)}</td><td>${e.timed ? `${s.r}s` : (s.w ? `${fmtW(conv(s.w, w.unit))} ${unit()} × ${s.r}` : `${s.r} reps`)}</td></tr>`).join('')}</tbody></table></div>`).join('');
     body = `<div class="row between"><div class="stack"><p class="eyebrow">${fmtDate(w.startedAt)}</p><h2>${esc(w.routineName)}</h2></div><button class="iconbtn" data-act="sheet-close" aria-label="Close">✕</button></div>
       <div class="stats"><div class="stat"><b class="num">${fmtDur(((w.endedAt || w.startedAt) - w.startedAt) / 1000)}</b><span>Duration</span></div><div class="stat"><b class="num">${sets}</b><span>Sets</span></div><div class="stat"><b class="num">${fmtNum(v)}</b><span>Volume (${unit()})</span></div></div>
+      ${figureBlock(w)}
+      <button class="btn primary block" data-act="share-open" data-v="${esc(w.id)}">Share workout</button>
       ${exs}
       <button class="btn danger block ${S.armed === 'del' + w.id ? 'armed' : ''}" data-act="del-workout" data-v="${esc(w.id)}">${S.armed === 'del' + w.id ? 'Tap again to delete' : 'Delete workout'}</button>`;
   }
@@ -1409,6 +1425,279 @@ function logWeight() {
   store.saveBody(e); inp.value = ''; render(); toast(`Logged ${f1(w)} ${unit()}`);
 }
 
+/* ---------- muscle map: which muscles each exercise trains ---------- */
+const MUSCLE_GROUPS = ['chest', 'frontDelt', 'sideDelt', 'rearDelt', 'biceps', 'triceps', 'forearms', 'traps', 'lats', 'midBack', 'lowBack', 'abs', 'obliques', 'glutes', 'quads', 'hamstrings', 'calves'];
+const MUSCLE_NAMES = {chest: 'Chest', frontDelt: 'Front delts', sideDelt: 'Side delts', rearDelt: 'Rear delts', biceps: 'Biceps', triceps: 'Triceps', forearms: 'Forearms', traps: 'Traps', lats: 'Lats', midBack: 'Mid back', lowBack: 'Lower back', abs: 'Abs', obliques: 'Obliques', glutes: 'Glutes', quads: 'Quads', hamstrings: 'Hamstrings', calves: 'Calves'};
+// [main targets, also worked] for each exercise in the program
+const EX_MUSCLES = {
+  'bench-press-barbell': [['chest'], ['frontDelt', 'triceps']],
+  'incline-bench-press-dumbbell': [['chest'], ['frontDelt', 'triceps']],
+  'overhead-press-dumbbell': [['frontDelt'], ['sideDelt', 'triceps']],
+  'face-pull': [['rearDelt'], ['traps', 'midBack']],
+  'lateral-raise-dumbbell': [['sideDelt'], ['traps']],
+  'triceps-pushdown': [['triceps'], []],
+  'crunch-machine': [['abs'], []],
+  'squat-barbell': [['quads', 'glutes'], ['lowBack']],
+  'leg-press-machine': [['quads'], ['glutes']],
+  'leg-extension-machine': [['quads'], []],
+  'seated-leg-curl-machine': [['hamstrings'], []],
+  'lunge-dumbbell': [['quads', 'glutes'], ['hamstrings']],
+  'standing-calf-raise': [['calves'], []],
+  'hanging-knee-raise': [['abs'], ['obliques', 'forearms']],
+  'bent-over-row-barbell': [['lats', 'midBack'], ['rearDelt', 'biceps', 'lowBack']],
+  'lat-pulldown-cable': [['lats'], ['biceps', 'midBack']],
+  'dumbbell-row': [['lats', 'midBack'], ['biceps', 'rearDelt']],
+  'bicep-curl-dumbbell': [['biceps'], ['forearms']],
+  'hammer-curl-dumbbell': [['biceps'], ['forearms']],
+  'decline-crunch': [['abs'], ['obliques']],
+  'deadlift-barbell': [['hamstrings', 'glutes', 'lowBack'], ['traps', 'forearms', 'quads', 'lats']],
+  'romanian-deadlift-barbell': [['hamstrings'], ['glutes', 'lowBack']],
+  'hip-thrust-barbell': [['glutes'], ['hamstrings']],
+  'lying-leg-curl-machine': [['hamstrings'], []],
+  'hip-abduction-machine': [['glutes'], []],
+  'seated-calf-raise': [['calves'], []],
+  'plank': [['abs'], ['obliques']]
+};
+// exercises you add yourself fall back to the muscle you picked for them
+const FIELD_MUSCLES = {Chest: [['chest'], ['frontDelt', 'triceps']], Back: [['lats', 'midBack'], ['biceps', 'rearDelt']], Shoulders: [['frontDelt', 'sideDelt'], ['triceps']],
+  'Side delts': [['sideDelt'], []], 'Rear delts': [['rearDelt'], ['traps']], Biceps: [['biceps'], ['forearms']], Triceps: [['triceps'], []], Quads: [['quads'], ['glutes']],
+  Hamstrings: [['hamstrings'], ['glutes']], Glutes: [['glutes'], ['hamstrings']], Calves: [['calves'], []], Abs: [['abs'], ['obliques']]};
+const musclesFor = e => EX_MUSCLES[e.exId || e.id] || FIELD_MUSCLES[e.muscle] || [[], []];
+function muscleLoad(w) {
+  const out = {};
+  for (const e of w.exercises) {
+    const n = working(e).length; if (!n) continue;
+    const [main, also] = musclesFor(e);
+    for (const m of main) { const o = out[m] || (out[m] = {score: 0, main: false}); o.score += n; o.main = true; }
+    for (const m of also) { const o = out[m] || (out[m] = {score: 0, main: false}); o.score += n * 0.5; }
+  }
+  return out;
+}
+const mainMuscles = load => MUSCLE_GROUPS.filter(m => load[m] && load[m].main);
+const alsoMuscles = load => MUSCLE_GROUPS.filter(m => load[m] && !load[m].main);
+
+/* ---------- 3D figure (three.js, loaded the first time it's needed) ----------
+   A stand-in mannequin: every muscle group is its own mesh, named like MUSCLE_GROUPS,
+   so a detailed anatomy model can replace build() later without touching the rest. */
+const THREE_URL = 'https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js';
+let threeP = null;
+function loadThree() {
+  if (window.THREE) return Promise.resolve();
+  if (!threeP) threeP = new Promise((res, rej) => {
+    const s = document.createElement('script'); s.src = THREE_URL; s.onload = res;
+    s.onerror = () => { threeP = null; s.remove(); rej(new Error('The 3D view needs an internet connection the first time.')); };
+    document.head.appendChild(s);
+  });
+  return threeP;
+}
+const FIG_COLORS = {
+  dark: {main: 0xE0525A, also: 0xF29A9E, off: 0x5B6570, skin: 0x3E4650},
+  light: {main: 0xD63B45, also: 0xF2A0A5, off: 0xB9C1CA, skin: 0x8C95A0}
+};
+const appTheme = () => {
+  const t = document.documentElement.dataset.theme;
+  return t === 'dark' || t === 'light' ? t : (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+};
+const Fig = {
+  r: null, scene: null, cam: null, body: null, mats: {}, skin: null, canvas: null,
+  ry: -0.5, rx: 0, drag: null, idle: 0, raf: 0, host: null, load: {},
+  ensure() {
+    if (this.r) return;
+    const T = window.THREE;
+    this.canvas = document.createElement('canvas'); this.canvas.className = 'fig-canvas';
+    this.canvas.setAttribute('aria-label', 'Muscles trained, drag to rotate'); this.canvas.setAttribute('role', 'img');
+    this.r = new T.WebGLRenderer({canvas: this.canvas, antialias: true, alpha: true, preserveDrawingBuffer: true});
+    this.r.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+    this.scene = new T.Scene();
+    this.cam = new T.PerspectiveCamera(28, 0.8, 0.1, 200); this.cam.position.set(0, 9.6, 40); this.cam.lookAt(0, 9.2, 0);
+    this.scene.add(new T.HemisphereLight(0xffffff, 0x3a4450, 0.85));
+    const d1 = new T.DirectionalLight(0xffffff, 0.75); d1.position.set(6, 14, 12); this.scene.add(d1);
+    const d2 = new T.DirectionalLight(0xffffff, 0.35); d2.position.set(-8, 6, -10); this.scene.add(d2);
+    this.body = new T.Group(); this.scene.add(this.body);
+    this.build(T);
+    const c = this.canvas;
+    c.addEventListener('pointerdown', e => { this.drag = {x: e.clientX, y: e.clientY, ry: this.ry, rx: this.rx}; c.setPointerCapture(e.pointerId); });
+    c.addEventListener('pointermove', e => { if (!this.drag) return; this.ry = this.drag.ry + (e.clientX - this.drag.x) * 0.012; this.rx = Math.max(-0.35, Math.min(0.35, this.drag.rx + (e.clientY - this.drag.y) * 0.006)); });
+    const up = () => { this.drag = null; this.idle = performance.now(); };
+    c.addEventListener('pointerup', up); c.addEventListener('pointercancel', up);
+  },
+  build(T) {
+    const g = new T.SphereGeometry(1, 40, 28);
+    this.skin = new T.MeshStandardMaterial({color: 0x6B7480, roughness: 0.7});
+    for (const m of MUSCLE_GROUPS) this.mats[m] = new T.MeshStandardMaterial({color: 0x8E97A1, roughness: 0.55, metalness: 0.05});
+    const blob = (mat, sx, sy, sz, x, y, z, rz, rx) => { const o = new T.Mesh(g, mat); o.scale.set(sx, sy, sz); o.position.set(x, y, z); o.rotation.z = rz || 0; o.rotation.x = rx || 0; this.body.add(o); };
+    const pair = (n, sx, sy, sz, x, y, z, rz, rx) => { const m = n ? this.mats[n] : this.skin; blob(m, sx, sy, sz, x, y, z, rz, rx); blob(m, sx, sy, sz, -x, y, z, -(rz || 0), rx); };
+    blob(this.skin, 0.95, 1.15, 1, 0, 16.9, 0.05);          // head
+    blob(this.skin, 0.55, 0.8, 0.55, 0, 15.4, 0);           // neck
+    blob(this.skin, 2.05, 3.1, 1.15, 0, 12.2, 0);           // torso core
+    blob(this.skin, 1.85, 1.2, 1.1, 0, 9.25, 0);            // pelvis
+    pair('chest', 1.08, 0.72, 0.42, 0.98, 13.35, 0.82, 0.12);
+    pair('frontDelt', 0.5, 0.66, 0.45, 2.05, 14.05, 0.42, -0.25);
+    pair('sideDelt', 0.42, 0.72, 0.5, 2.38, 13.9, 0, -0.2);
+    pair('rearDelt', 0.5, 0.64, 0.45, 2.05, 14.05, -0.44, -0.25);
+    pair('traps', 1.05, 0.62, 0.5, 0.72, 14.85, -0.42, 0.35);
+    pair('lats', 0.95, 1.9, 0.42, 1.3, 12.1, -0.72, -0.12);
+    pair('midBack', 0.75, 0.95, 0.3, 0.55, 13.2, -1.0);
+    pair('lowBack', 0.42, 1.25, 0.32, 0.42, 10.7, -1.0);
+    pair('obliques', 0.45, 1.25, 0.42, 1.5, 11.0, 0.52, 0.08);
+    blob(this.mats.abs, 0.9, 1.7, 0.36, 0, 11.25, 0.98);
+    pair('biceps', 0.44, 1.05, 0.46, 2.66, 12.35, 0.24, 0.07);
+    pair('triceps', 0.48, 1.18, 0.48, 2.64, 12.45, -0.3, 0.07);
+    pair('forearms', 0.4, 1.25, 0.42, 2.95, 9.9, 0.05, 0.05);
+    pair(null, 0.34, 0.55, 0.2, 3.05, 8.35, 0.05, 0.05);     // hands
+    pair('glutes', 0.95, 0.9, 0.62, 0.66, 9.0, -0.7);
+    pair('quads', 0.78, 2.15, 0.7, 0.86, 6.55, 0.22, -0.03);
+    pair('hamstrings', 0.68, 1.95, 0.58, 0.86, 6.65, -0.32, -0.03);
+    pair(null, 0.42, 0.45, 0.45, 0.92, 4.3, 0);              // knees
+    pair('calves', 0.5, 1.35, 0.56, 0.92, 2.55, -0.22);
+    pair(null, 0.34, 1.6, 0.34, 0.92, 2.55, 0.18);           // shins
+    pair(null, 0.4, 0.22, 0.85, 0.95, 0.35, 0.35);           // feet
+  },
+  paint(load, theme) {
+    const c = FIG_COLORS[theme];
+    for (const m of MUSCLE_GROUPS) this.mats[m].color.setHex(!load[m] ? c.off : load[m].main ? c.main : c.also);
+    this.skin.color.setHex(c.skin);
+  },
+  size(w, h) { this.r.setSize(w, h, false); this.cam.aspect = w / h; this.cam.updateProjectionMatrix(); },
+  // after each redraw, move the one canvas into the figure slot on screen (if any)
+  attach() {
+    const hosts = document.querySelectorAll('.fig-host'), host = hosts[hosts.length - 1];
+    if (!host) { this.stop(); return; }
+    const w = S.workouts.find(x => x.id === host.dataset.w); if (!w) return;
+    loadThree().then(() => {
+      if (!host.isConnected) return;
+      this.ensure(); this.host = host; this.load = muscleLoad(w);
+      host.innerHTML = ''; host.appendChild(this.canvas);
+      this.size(host.clientWidth || 300, host.clientHeight || 300); this.paint(this.load, appTheme());
+      if (!this.raf) this.loop();
+    }).catch(e => { host.innerHTML = `<p class="small muted" style="margin:auto;text-align:center">${esc(e.message)}</p>`; });
+  },
+  loop() {
+    if (!this.host || !this.host.isConnected) { this.raf = 0; return; }
+    if (!this.drag && performance.now() - this.idle > 1500 && !matchMedia('(prefers-reduced-motion: reduce)').matches) this.ry += 0.006;
+    this.body.rotation.set(this.rx, this.ry, 0); this.r.render(this.scene, this.cam);
+    this.raf = requestAnimationFrame(() => this.loop());
+  },
+  stop() { cancelAnimationFrame(this.raf); this.raf = 0; this.host = null; },
+  snapshot(angle, w, h, theme, load) {
+    this.paint(load, theme); this.size(w, h);
+    this.body.rotation.set(0, angle, 0); this.r.render(this.scene, this.cam);
+    const url = this.canvas.toDataURL('image/png');
+    if (this.host) { this.size(this.host.clientWidth || 300, this.host.clientHeight || 300); this.paint(this.load, appTheme()); }
+    return url;
+  }
+};
+function figureBlock(w) {
+  const load = muscleLoad(w), main = mainMuscles(load), also = alsoMuscles(load);
+  return `<div class="fig-wrap"><div class="fig-host" data-w="${esc(w.id)}"></div>
+    <div class="stack small" style="gap:6px">
+      <div class="legend"><span><i class="main-sw"></i>Main target</span><span><i class="also-sw"></i>Also worked</span></div>
+      ${main.length ? `<span><b>Main:</b> ${main.map(m => MUSCLE_NAMES[m]).join(', ')}</span>` : ''}
+      ${also.length ? `<span class="muted"><b>Also:</b> ${also.map(m => MUSCLE_NAMES[m]).join(', ')}</span>` : ''}
+      <span class="muted">Drag the figure to turn it.</span></div></div>`;
+}
+
+/* ---------- share image: front + back views and the full log, 1080×1920 for Stories ---------- */
+const SHARE_THEME = {
+  dark: {bg: '#10151C', ink: '#E8ECF1', muted: '#95A0AD', line: '#2A313A', accent: '#6A93FF', pr: '#FF6275', panel: '#171D26'},
+  light: {bg: '#F4F6F8', ink: '#121820', muted: '#5A6573', line: '#D3D9E0', accent: '#1B4FD6', pr: '#C81F34', panel: '#FFFFFF'}
+};
+function bestSet(e, unitFrom) {
+  const ws = working(e); if (!ws.length) return null;
+  if (e.timed) return {text: `${Math.max(...ws.map(s => s.r || 0))} s`};
+  const withW = ws.filter(s => s.w > 0);
+  if (!withW.length) return {text: `${Math.max(...ws.map(s => s.r || 0))} reps`};
+  const b = withW.reduce((a, s) => (s.w > a.w || (s.w === a.w && s.r > a.r)) ? s : a);
+  return {text: `${fmtW(conv(b.w, unitFrom))} × ${b.r}`};
+}
+const loadImg = src => new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = src; });
+async function makeShareImage(w, theme) {
+  await loadThree(); Fig.ensure();
+  try { await document.fonts.ready; } catch {}
+  const P = SHARE_THEME[theme], load = muscleLoad(w);
+  const [front, back] = await Promise.all([loadImg(Fig.snapshot(0, 460, 760, theme, load)), loadImg(Fig.snapshot(Math.PI, 460, 760, theme, load))]);
+  const C = document.createElement('canvas'); C.width = 1080; C.height = 1920;
+  const x = C.getContext('2d'), L = 76, R = 1080 - 76;
+  const D = '"Barlow Condensed", "Arial Narrow", sans-serif', B = 'Barlow, system-ui, sans-serif';
+  const text = (s, px, y, font, color, align = 'left') => { x.font = font; x.fillStyle = color; x.textAlign = align; x.fillText(s, px, y); };
+  const fit = (s, font, max) => { x.font = font; if (x.measureText(s).width <= max) return s; while (s.length > 1 && x.measureText(s + '…').width > max) s = s.slice(0, -1); return s + '…'; };
+  x.fillStyle = P.bg; x.fillRect(0, 0, 1080, 1920);
+  // header
+  text(new Date(w.startedAt).toLocaleDateString(undefined, {weekday: 'long', month: 'long', day: 'numeric'}), L, 128, `600 32px ${B}`, P.muted);
+  text(fit(w.routineName.toUpperCase(), `700 112px ${D}`, R - L), L, 238, `700 112px ${D}`, P.ink);
+  const rt = S.program.routines.find(r => r.id === w.routineId);
+  if (rt && rt.focus) text(rt.focus, L, 290, `600 34px ${B}`, P.accent);
+  // stats
+  const {v, sets} = volume(w), prs = (w.prs || []).length;
+  const stats = [['TIME', fmtDur(((w.endedAt || w.startedAt) - w.startedAt) / 1000)], ['SETS', String(sets)], ['VOLUME', `${fmtNum(v)} ${unit()}`], ['PRS', String(prs)]];
+  stats.forEach(([k, val], i) => {
+    const sx = L + i * ((R - L) / 4);
+    text(k, sx, 368, `600 24px ${B}`, P.muted);
+    text(val, sx, 428, `700 58px ${D}`, k === 'PRS' && prs ? P.pr : P.ink);
+  });
+  // figures
+  const fy = 470, fw = 440, fh = 727;
+  x.drawImage(front, 540 - 20 - fw, fy, fw, fh); x.drawImage(back, 540 + 20, fy, fw, fh);
+  text('FRONT', 540 - 20 - fw / 2, fy + fh + 30, `600 24px ${B}`, P.muted, 'center');
+  text('BACK', 540 + 20 + fw / 2, fy + fh + 30, `600 24px ${B}`, P.muted, 'center');
+  const main = mainMuscles(load).map(m => MUSCLE_NAMES[m]).join(' · ');
+  if (main) text(fit(main, `600 30px ${B}`, R - L), 540, fy + fh + 82, `600 30px ${B}`, P.ink, 'center');
+  // log
+  let y = fy + fh + 140;
+  x.fillStyle = P.line; x.fillRect(L, y - 44, R - L, 2);
+  const rows = w.exercises.filter(e => working(e).length), room = Math.floor((1790 - y) / 58);
+  const shown = rows.length > room ? rows.slice(0, room - 1) : rows;
+  for (const e of shown) {
+    const b = bestSet(e, w.unit), pr = (w.prs || []).includes(e.exId);
+    text(fit(e.name.replace(/ \((Barbell|Dumbbell|Machine|Cable)\)$/, ''), `500 34px ${B}`, 600), L, y, `500 34px ${B}`, P.ink);
+    text((b ? b.text : '') + (pr ? '  ★' : ''), R, y, `700 38px ${D}`, pr ? P.pr : P.ink, 'right');
+    y += 58;
+  }
+  if (shown.length < rows.length) text(`+ ${rows.length - shown.length} more`, L, y, `500 30px ${B}`, P.muted);
+  // footer
+  text('LIFT', L, 1856, `700 44px ${D}`, P.ink);
+  x.font = `700 44px ${D}`; const lw = x.measureText('LIFT').width;
+  text('BOOK', L + lw, 1856, `700 44px ${D}`, P.accent);
+  text(prs ? '★ new record · best set shown' : 'best set shown', R, 1852, `500 26px ${B}`, P.muted, 'right');
+  return new Promise(res => C.toBlob(res, 'image/png'));
+}
+function shareFileName(w) { return `liftbook-${slug(w.routineName)}-${localISO(w.startedAt)}.png`; }
+async function prepareShare() {
+  const sh = S.sheet; if (!sh || sh.type !== 'share') return;
+  const w = S.workouts.find(x => x.id === sh.id); if (!w) return;
+  const theme = S.profile.shareTheme || 'dark', token = {};
+  S.shareToken = token; sh.busy = true; sh.error = '';
+  try {
+    const blob = await makeShareImage(w, theme);
+    if (S.shareToken !== token) return;
+    if (sh.url) URL.revokeObjectURL(sh.url);
+    sh.blob = blob; sh.url = URL.createObjectURL(blob);
+  } catch (e) { sh.error = e.message || 'Couldn’t make the image.'; }
+  sh.busy = false; if (S.sheet === sh) render();
+}
+function viewShareSheet() {
+  const sh = S.sheet, w = S.workouts.find(x => x.id === sh.id); if (!w) { S.sheet = null; return ''; }
+  const theme = S.profile.shareTheme || 'dark';
+  return `<div class="row between"><h2>Share workout</h2><button class="iconbtn" data-act="sheet-close" aria-label="Close">✕</button></div>
+    <div class="row between"><span class="small muted">Card style</span><div class="seg" role="group" aria-label="Card style">
+      <button data-act="share-theme" data-v="dark" aria-pressed="${theme === 'dark'}">Dark</button><button data-act="share-theme" data-v="light" aria-pressed="${theme === 'light'}">Light</button></div></div>
+    <div class="share-preview">${sh.url ? `<img src="${sh.url}" alt="Share image for ${esc(w.routineName)}">` : `<p class="small muted">${sh.error ? esc(sh.error) : 'Making your image…'}</p>`}</div>
+    <button class="btn primary lg block" data-act="share-go" ${sh.url ? '' : 'disabled'}>Share image</button>
+    <p class="small muted" style="margin:0;text-align:center">Opens your phone’s share menu: Instagram, Messages, Save Image and more. Or press and hold the picture to save it.</p>`;
+}
+async function shareGo() {
+  const sh = S.sheet; if (!sh || !sh.blob) return;
+  const w = S.workouts.find(x => x.id === sh.id), name = shareFileName(w);
+  const file = new File([sh.blob], name, {type: 'image/png'});
+  // share straight from the tap: phones only allow the share menu during a user gesture
+  if (navigator.canShare && navigator.canShare({files: [file]})) {
+    try { await navigator.share({files: [file]}); } catch (e) { if (e.name !== 'AbortError') toast('Couldn’t open the share menu. Press and hold the image to save it.'); }
+    return;
+  }
+  const a = document.createElement('a'); a.href = sh.url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
+  toast('Image saved');
+}
+
 /* ---------- events ---------- */
 let armT;
 function arm(key) { if (S.armed === key) return true; S.armed = key; clearTimeout(armT); armT = setTimeout(() => { S.armed = null; render(); }, 3500); render(); return false; }
@@ -1446,6 +1735,9 @@ const A = {
   'del-workout': d => { if (!arm('del' + d.v)) return; disarm(); S.workouts = S.workouts.filter(w => w.id !== d.v); S.sheet = null; store.deleteWorkout(d.v); render(); toast('Workout deleted'); },
   'dismiss-summary': () => { S.summary = null; render(); },
   'sync-now': () => Sync.run(true),
+  'share-open': d => { S.sheet = {type: 'share', id: d.v}; render(); prepareShare(); },
+  'share-theme': d => { if ((S.profile.shareTheme || 'dark') === d.v) return; S.profile.shareTheme = d.v; store.saveProfile(); const sh = S.sheet; if (sh.url) URL.revokeObjectURL(sh.url); sh.url = null; sh.blob = null; render(); prepareShare(); },
+  'share-go': () => shareGo(),
   'scan-open': d => { S.sheet = {type: 'scan', id: d.v || null}; S.scanMsg = ''; disarm(); render(); },
   'scan-del': d => { if (!arm('scandel')) return; disarm(); S.body = S.body.filter(e => e.id !== d.v); store.deleteBody(d.v); S.sheet = null; S.scanIdx = null; render(); toast('Scan deleted'); },
   seg: d => { S.bodySeg = S.bodySeg === d.v ? null : d.v; render(); },
