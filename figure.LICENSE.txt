@@ -4,7 +4,7 @@ Derived from:
   "Z-Anatomy - The libre 3D atlas of anatomy" — CC BY-SA 4.0 — https://github.com/Z-Anatomy/Models-of-human-anatomy
   "BodyParts3D, The Database Center for Life Science" — CC BY-SA 2.1 Japan — https://dbarchive.biosciencedbc.jp/en/bodyparts3d/
 
-Changes: selected superficial muscles and the skeleton, merged into 17 muscle groups plus a neutral body mesh,
+Changes: selected superficial muscles and the skeleton (skull replaced by a smooth head), merged into 17 muscle groups plus a neutral body mesh,
 trimmed the external oblique aponeurosis over the rectus abdominis, decimated, rescaled, exported as glTF.
 Build scripts: tools/anatomy/build_figure.py and tools/anatomy/export_glb.py.
 

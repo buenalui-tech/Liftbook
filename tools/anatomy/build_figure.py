@@ -8,6 +8,7 @@ plus a neutral 'body' mesh, decimated for phones. Also renders front/back test i
 """
 import sys
 import os
+import re
 import bpy
 
 OUT = sys.argv[sys.argv.index('--') + 1] if '--' in sys.argv else '/tmp'
@@ -36,11 +37,13 @@ GROUPS = {
 }
 # visible but never scored: rounds out the silhouette
 NEUTRAL_MUSCLES = ['Sartorius muscle', 'Tensor fasciae latae', 'Gracilis muscle', 'Adductor longus', 'Adductor magnus', 'Tibialis anterior muscle',
-                   'Fibularis longus muscle', 'Platysma', 'Temporalis muscle', 'Frontalis muscle', 'Occipitalis muscle', 'Masseter muscle',
+                   'Fibularis longus muscle', 'Platysma',
                    'Sternocleidomastoid muscle', 'Splenius capitis muscle', 'Extensor digitorum longus', 'Teres minor muscle', 'Pectoralis minor muscle']
-NEUTRAL_BONE_COLLECTIONS = ['Cranium', 'Extracranial bones of head', 'Vertebral column', 'Thoracic skeleton', 'Bony pelvis',
+# the skull reads as creepy on a fitness app, so the head is a smooth shape sized to it (see smooth_head)
+HEAD_COLLECTIONS = ['Cranium', 'Extracranial bones of head']
+NEUTRAL_BONE_COLLECTIONS = ['Vertebral column', 'Thoracic skeleton', 'Bony pelvis',
                             'Bones of upper limb', 'Bones of lower limb']
-TRI_BUDGET = {'body': 60000}   # neutral mesh budget; muscle groups get DEFAULT_TRIS each
+TRI_BUDGET = {'body': 60000, 'head': 6000}   # neutral mesh budget; muscle groups get DEFAULT_TRIS each
 DEFAULT_TRIS = 5000
 
 objs = {o.name: o for o in bpy.data.objects if o.type == 'MESH'}
@@ -125,6 +128,48 @@ missing += [n for n in NEUTRAL_MUSCLES if not sides(n)]
 for cn in NEUTRAL_BONE_COLLECTIONS:
     neutral_src += [o for o in collection_meshes(cn) if 'tooth' not in o.name.lower() and 'teeth' not in o.name.lower()]
 body = merged('body', neutral_src)
+
+
+def bounds(meshes):
+    import mathutils
+    lo = mathutils.Vector((1e9, 1e9, 1e9)); hi = -lo
+    for o in meshes:
+        for c in o.bound_box:
+            w = o.matrix_world @ mathutils.Vector(c)
+            lo = mathutils.Vector(map(min, lo, w)); hi = mathutils.Vector(map(max, hi, w))
+    return lo, hi
+
+
+def smooth_head():
+    """A plain head: a cranium ellipsoid plus a jaw ellipsoid, each sized to the skull with a little soft tissue."""
+    import bmesh, mathutils
+    # size from the named vault/face bones only; the collections also hold labels and helpers that span the body
+    SKULL = ('frontal bone', 'parietal bone', 'occipital bone', 'temporal bone', 'zygomatic bone', 'maxilla', 'nasal bone', 'mandible')
+    skull = [o for cn in HEAD_COLLECTIONS for o in collection_meshes(cn) if re.sub(r'\.[lr]$', '', o.name.lower()) in SKULL]
+    print('head sized from', sorted({o.name for o in skull}))
+    jaw = [o for o in skull if 'mandible' in o.name.lower()]
+    lo, hi = bounds(skull)
+    jlo, jhi = bounds(jaw) if jaw else (lo, hi)
+    bm = bmesh.new()
+    def ellipsoid(center, radii):
+        m = bmesh.ops.create_uvsphere(bm, u_segments=48, v_segments=32, radius=1.0)
+        for v in m['verts']:
+            v.co = mathutils.Vector((v.co.x * radii.x + center.x, v.co.y * radii.y + center.y, v.co.z * radii.z + center.z))
+    size = hi - lo
+    cranium_c = (lo + hi) / 2 + mathutils.Vector((0, 0, size.z * 0.08))
+    ellipsoid(cranium_c, mathutils.Vector((size.x * 0.54, size.y * 0.53, size.z * 0.44)))
+    jsize = jhi - jlo
+    jaw_c = (jlo + jhi) / 2 + mathutils.Vector((0, -jsize.y * 0.05, jsize.z * 0.1))
+    ellipsoid(jaw_c, mathutils.Vector((jsize.x * 0.48, jsize.y * 0.5, jsize.z * 0.62)))
+    mesh = bpy.data.meshes.new('head'); bm.to_mesh(mesh); bm.free()
+    for p in mesh.polygons:
+        p.use_smooth = True
+    return bpy.data.objects.new('head', mesh)
+
+
+head = smooth_head()
+coll.objects.link(head)
+built.append(head)
 coll.objects.link(body)
 built.append(body)
 
