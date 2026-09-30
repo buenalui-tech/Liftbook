@@ -1031,6 +1031,9 @@ function viewProgram() {
       <p class="small muted">${Sync.user ? 'Your log syncs to your account automatically. Exports are an extra copy you keep yourself.' : 'Export a backup now and then, and use Import to move your log to a new phone.'}</p>
       <div class="row" style="flex-wrap:wrap"><button class="btn" data-act="export-json">Export backup (.json)</button><button class="btn" data-act="export-csv">Export sets (.csv)</button><label class="btn" for="import-file">Import backup</label><input type="file" id="import-file" accept=".json,application/json" hidden></div>
       <button class="btn danger ${S.armed === 'reset' ? 'armed' : ''}" data-act="reset-program">${S.armed === 'reset' ? 'Tap again to reset program' : 'Reset program to Jeff Nippard 4-Day UL'}</button>
+    </section>
+    <section class="card"><h3>Credits</h3>
+      <p class="small muted" style="margin:0">3D muscle figure adapted from <a href="https://github.com/Z-Anatomy/Models-of-human-anatomy" target="_blank" rel="noopener">Z-Anatomy</a> (CC BY-SA 4.0) and <a href="https://dbarchive.biosciencedbc.jp/en/bodyparts3d/" target="_blank" rel="noopener">BodyParts3D</a>, The Database Center for Life Science (CC BY-SA 2.1 JP). The adapted figure is shared under <a href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank" rel="noopener">CC BY-SA 4.0</a>.</p>
     </section>`;
 }
 
@@ -1477,22 +1480,32 @@ const mainMuscles = load => MUSCLE_GROUPS.filter(m => load[m] && load[m].main);
 const alsoMuscles = load => MUSCLE_GROUPS.filter(m => load[m] && !load[m].main);
 
 /* ---------- 3D figure (three.js, loaded the first time it's needed) ----------
-   A stand-in mannequin: every muscle group is its own mesh, named like MUSCLE_GROUPS,
-   so a detailed anatomy model can replace build() later without touching the rest. */
+   figure.glb is built from the Z-Anatomy atlas by tools/anatomy: one mesh per muscle group,
+   named like MUSCLE_GROUPS, plus a neutral 'body'. If it can't load, a simple mannequin stands in. */
 const THREE_URL = 'https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js';
-let threeP = null;
+const GLTF_URL = 'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js';
+const loadScript = src => new Promise((res, rej) => {
+  const s = document.createElement('script'); s.src = src; s.onload = res;
+  s.onerror = () => { s.remove(); rej(new Error('The 3D view needs an internet connection the first time.')); };
+  document.head.appendChild(s);
+});
+let threeP = null, modelP = null;
 function loadThree() {
-  if (window.THREE) return Promise.resolve();
-  if (!threeP) threeP = new Promise((res, rej) => {
-    const s = document.createElement('script'); s.src = THREE_URL; s.onload = res;
-    s.onerror = () => { threeP = null; s.remove(); rej(new Error('The 3D view needs an internet connection the first time.')); };
-    document.head.appendChild(s);
-  });
+  if (!threeP) threeP = (window.THREE ? Promise.resolve() : loadScript(THREE_URL))
+    .then(() => window.THREE.GLTFLoader ? null : loadScript(GLTF_URL).catch(() => null))
+    .catch(e => { threeP = null; throw e; });
   return threeP;
 }
+function loadModel() {
+  if (!modelP) modelP = loadThree().then(() => new Promise(res => {
+    if (!window.THREE.GLTFLoader) return res(null);
+    new window.THREE.GLTFLoader().load('figure.glb', g => res(g.scene), undefined, () => res(null));
+  }));
+  return modelP;
+}
 const FIG_COLORS = {
-  dark: {main: 0xE0525A, also: 0xF29A9E, off: 0x5B6570, skin: 0x3E4650},
-  light: {main: 0xD63B45, also: 0xF2A0A5, off: 0xB9C1CA, skin: 0x8C95A0}
+  dark: {main: 0xE0525A, also: 0xF29A9E, off: 0x5E6874, skin: 0x7A8490},
+  light: {main: 0xD63B45, also: 0xF2A0A5, off: 0xAEB6BF, skin: 0xD3D8DE}
 };
 const appTheme = () => {
   const t = document.documentElement.dataset.theme;
@@ -1501,7 +1514,8 @@ const appTheme = () => {
 const Fig = {
   r: null, scene: null, cam: null, body: null, mats: {}, skin: null, canvas: null,
   ry: -0.5, rx: 0, drag: null, idle: 0, raf: 0, host: null, load: {},
-  ensure() {
+  async ready() { const model = await loadModel(); this.ensure(model); },
+  ensure(model) {
     if (this.r) return;
     const T = window.THREE;
     this.canvas = document.createElement('canvas'); this.canvas.className = 'fig-canvas';
@@ -1509,17 +1523,23 @@ const Fig = {
     this.r = new T.WebGLRenderer({canvas: this.canvas, antialias: true, alpha: true, preserveDrawingBuffer: true});
     this.r.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
     this.scene = new T.Scene();
-    this.cam = new T.PerspectiveCamera(28, 0.8, 0.1, 200); this.cam.position.set(0, 9.6, 40); this.cam.lookAt(0, 9.2, 0);
+    this.cam = new T.PerspectiveCamera(28, 0.8, 0.1, 200); this.cam.position.set(0, 9.3, 35); this.cam.lookAt(0, 9.1, 0);
     this.scene.add(new T.HemisphereLight(0xffffff, 0x3a4450, 0.85));
     const d1 = new T.DirectionalLight(0xffffff, 0.75); d1.position.set(6, 14, 12); this.scene.add(d1);
     const d2 = new T.DirectionalLight(0xffffff, 0.35); d2.position.set(-8, 6, -10); this.scene.add(d2);
     this.body = new T.Group(); this.scene.add(this.body);
-    this.build(T);
+    if (model) this.useModel(T, model); else this.build(T);
     const c = this.canvas;
     c.addEventListener('pointerdown', e => { this.drag = {x: e.clientX, y: e.clientY, ry: this.ry, rx: this.rx}; c.setPointerCapture(e.pointerId); });
     c.addEventListener('pointermove', e => { if (!this.drag) return; this.ry = this.drag.ry + (e.clientX - this.drag.x) * 0.012; this.rx = Math.max(-0.35, Math.min(0.35, this.drag.rx + (e.clientY - this.drag.y) * 0.006)); });
     const up = () => { this.drag = null; this.idle = performance.now(); };
     c.addEventListener('pointerup', up); c.addEventListener('pointercancel', up);
+  },
+  useModel(T, model) {
+    this.skin = new T.MeshStandardMaterial({color: 0x7A8490, roughness: 0.75});
+    for (const m of MUSCLE_GROUPS) this.mats[m] = new T.MeshStandardMaterial({color: 0x8E97A1, roughness: 0.55, metalness: 0.05});
+    model.traverse(o => { if (o.isMesh) o.material = this.mats[o.name] || this.skin; });
+    this.body.add(model);
   },
   build(T) {
     const g = new T.SphereGeometry(1, 40, 28);
@@ -1564,9 +1584,9 @@ const Fig = {
     const hosts = document.querySelectorAll('.fig-host'), host = hosts[hosts.length - 1];
     if (!host) { this.stop(); return; }
     const w = S.workouts.find(x => x.id === host.dataset.w); if (!w) return;
-    loadThree().then(() => {
+    this.ready().then(() => {
       if (!host.isConnected) return;
-      this.ensure(); this.host = host; this.load = muscleLoad(w);
+      this.host = host; this.load = muscleLoad(w);
       host.innerHTML = ''; host.appendChild(this.canvas);
       this.size(host.clientWidth || 300, host.clientHeight || 300); this.paint(this.load, appTheme());
       if (!this.raf) this.loop();
@@ -1612,7 +1632,7 @@ function bestSet(e, unitFrom) {
 }
 const loadImg = src => new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = src; });
 async function makeShareImage(w, theme) {
-  await loadThree(); Fig.ensure();
+  await Fig.ready();
   try { await document.fonts.ready; } catch {}
   const P = SHARE_THEME[theme], load = muscleLoad(w);
   const [front, back] = await Promise.all([loadImg(Fig.snapshot(0, 460, 760, theme, load)), loadImg(Fig.snapshot(Math.PI, 460, 760, theme, load))]);

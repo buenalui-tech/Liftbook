@@ -9,7 +9,7 @@ import shutil
 OUT = '/tmp/lb_harness'
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 os.makedirs(OUT, exist_ok=True)
-for f in ['manifest.webmanifest', 'icon-192.png', 'icon-512.png', 'apple-touch-icon.png']:
+for f in ['manifest.webmanifest', 'icon-192.png', 'icon-512.png', 'apple-touch-icon.png', 'figure.glb']:
     shutil.copy(os.path.join(ROOT, f), OUT)
 shutil.copy(os.path.join(ROOT, 'tests', 'mock-supabase.js'), OUT)
 

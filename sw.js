@@ -1,9 +1,10 @@
 // Offline support: the app shell is cached so Liftbook opens with no signal (gym basements).
 // Bump VERSION whenever index.html changes so phones pick up the new build.
-const VERSION = 'liftbook-v7';
+const VERSION = 'liftbook-v8';
 const SUPABASE_JS = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.2/dist/umd/supabase.js';
 const THREE_JS = 'https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js';
-const SHELL = ['./', './index.html', './config.js', SUPABASE_JS, THREE_JS, './manifest.webmanifest', './icon-192.png', './icon-512.png', './apple-touch-icon.png'];
+const GLTF_JS = 'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js';
+const SHELL = ['./', './index.html', './config.js', SUPABASE_JS, THREE_JS, GLTF_JS, './figure.glb', './manifest.webmanifest', './icon-192.png', './icon-512.png', './apple-touch-icon.png'];
 
 self.addEventListener('install', e => {
   // cache each file on its own so one missing file doesn't block offline support
@@ -34,7 +35,7 @@ self.addEventListener('fetch', e => {
   }
 
   // own files and Google Fonts: cache first, fill the cache on first use
-  if (url.origin === location.origin || url.href === SUPABASE_JS || url.href === THREE_JS || url.host.endsWith('fonts.googleapis.com') || url.host.endsWith('fonts.gstatic.com')) {
+  if (url.origin === location.origin || url.href === SUPABASE_JS || url.href === THREE_JS || url.href === GLTF_JS || url.host.endsWith('fonts.googleapis.com') || url.host.endsWith('fonts.gstatic.com')) {
     e.respondWith(caches.match(req).then(hit => hit || fetch(req).then(res => {
       if (res.ok || res.type === 'opaque') { const copy = res.clone(); caches.open(VERSION).then(c => c.put(req, copy)); }
       return res;
