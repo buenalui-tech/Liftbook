@@ -18,6 +18,8 @@
       if (window.MOCK_OFFLINE) return {data: null, error: {message: 'Failed to fetch'}};
       const d = load(), uid = getUid(); if (!uid) return {data: null, error: {message: 'JWT missing'}};
       const t = d[table];
+      // like PostgREST when setup SQL hasn't created the table yet
+      if (!t) return {data: null, error: {code: 'PGRST205', message: `Could not find the table 'public.${table}' in the schema cache`}};
       if (st.op === 'upsert') {
         for (const r of st.rows) {
           if (r.user_id !== uid) return {data: null, error: {message: 'new row violates row-level security policy'}};
