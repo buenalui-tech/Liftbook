@@ -42,5 +42,5 @@ def write_png(path, px):
 
 
 for name, size in [('icon-192.png', 192), ('icon-512.png', 512), ('apple-touch-icon.png', 180)]:
-    write_png(f'icons/{name}', draw(size))
-    print('wrote icons/' + name)
+    write_png(name, draw(size))
+    print('wrote ' + name)

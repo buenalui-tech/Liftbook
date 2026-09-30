@@ -15,7 +15,7 @@ A workout log that runs in your phone's browser and installs to the home screen.
 | `index.html` | The whole app |
 | `manifest.webmanifest` | Lets phones install it as a home-screen app |
 | `sw.js` | Offline cache. **Bump `VERSION` whenever you change `index.html`** |
-| `icons/` | App icons, drawn by `tools/make_icons.py` |
+| `icon-192.png`, `icon-512.png`, `apple-touch-icon.png` | App icons, drawn by `tools/make_icons.py` |
 
 ## Run locally
 
