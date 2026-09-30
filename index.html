@@ -214,6 +214,7 @@ button.day:disabled{opacity:.35;cursor:default}
 .mbar .val{position:absolute;top:2px;bottom:2px;left:0;border-radius:4px;background:var(--accent)}
 .chart svg{width:100%;height:auto;display:block}
 .chart text{fill:var(--muted);font-size:10px;font-family:var(--body)}
+.wt-chart svg{cursor:crosshair}
 
 /* program editor */
 .edrow{display:grid;grid-template-columns:1fr;gap:8px;padding:12px 0;border-top:1px solid var(--line)}
@@ -1445,23 +1446,37 @@ function viewWeightCard() {
       ${!S.wtAll && S.body.filter(e => e.kind === 'weight').length > 5 ? `<button class="btn ghost" data-act="wt-all">Show more</button>` : ''}</details>` : ''}
   </section>`;
 }
+// gridlines at clean steps (0.1, 0.2, 0.5, 1, 2, 5…) so a line labelled 197.5 sits exactly at 197.5
+function niceTicks(lo, hi, want = 5) {
+  const raw = (hi - lo) / want, mag = Math.pow(10, Math.floor(Math.log10(raw)));
+  const step = [1, 2, 5, 10].map(m => m * mag).find(s => s >= raw) || 10 * mag;
+  const out = []; for (let v = Math.ceil(lo / step) * step; v <= hi + 1e-9; v += step) out.push(+v.toFixed(6));
+  return {ticks: out, digits: step < 1 ? Math.max(1, -Math.floor(Math.log10(step) + 1e-9)) : 0};
+}
 function weightChart(pts) {
   if (!pts.length) return '';
-  const W = 320, H = 160, L = 34, R = 10, T = 10, B = 22, u = unit();
+  const W = 320, H = 170, L = 40, R = 10, T = 10, B = 22, u = unit();
   const vals = pts.flatMap(p => [fromKg(p.kg), fromKg(p.trend)]);
-  let lo = Math.min(...vals), hi = Math.max(...vals); if (hi - lo < 2) { lo -= 1; hi += 1; }
-  const pd = (hi - lo) * .12; lo -= pd; hi += pd;
+  let lo = Math.min(...vals), hi = Math.max(...vals); if (hi - lo < 1) { const c = (lo + hi) / 2; lo = c - 0.5; hi = c + 0.5; }
+  const pd = (hi - lo) * .1; lo -= pd; hi += pd;
   const t0 = pts[0].t, t1 = pts[pts.length - 1].t, span = Math.max(DAY, t1 - t0);
   const x = t => pts.length === 1 ? (L + W - R) / 2 : L + (t - t0) / span * (W - L - R), y = v => T + (1 - (v - lo) / (hi - lo)) * (H - T - B);
-  const ticks = [lo + pd, (lo + hi) / 2, hi - pd].map(v => `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" stroke="var(--line)"/><text x="${L - 5}" y="${y(v) + 3}" text-anchor="end">${Math.round(v)}</text>`).join('');
+  const {ticks, digits} = niceTicks(lo, hi);
+  const grid = ticks.map(v => `<line x1="${L}" x2="${W - R}" y1="${y(v).toFixed(1)}" y2="${y(v).toFixed(1)}" stroke="var(--line)"/><text x="${L - 5}" y="${(y(v) + 3).toFixed(1)}" text-anchor="end">${v.toFixed(digits)}</text>`).join('');
   const line = pts.map((p, i) => `${i ? 'L' : 'M'}${x(p.t).toFixed(1)},${y(fromKg(p.trend)).toFixed(1)}`).join('');
   const dl = t => new Date(t).toLocaleDateString(undefined, {month: 'short', day: 'numeric'});
-  const lastP = pts[pts.length - 1];
-  return `<div class="chart"><svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Weight trend in ${u}">${ticks}
-    ${pts.map(p => `<circle cx="${x(p.t)}" cy="${y(fromKg(p.kg))}" r="2.5" fill="${p.kind === 'scan' ? 'var(--plate-yellow)' : 'var(--muted)'}" opacity=".7"/>`).join('')}
+  const lastP = pts[pts.length - 1], sel = pts.find(p => p.t === S.wtSel) || null;
+  // remembered for tap-to-read (see the 'wt-chart' handler)
+  S.wtChart = {pts, x0: L, x1: W - R, W, t0, span};
+  return `<div class="chart wt-chart"><svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Weight trend in ${u}. Tap to read a day." data-act="wt-chart">${grid}
+    ${sel ? `<line x1="${x(sel.t)}" x2="${x(sel.t)}" y1="${T}" y2="${H - B}" stroke="var(--muted)" stroke-dasharray="3 3"/>` : ''}
+    ${pts.map(p => `<circle cx="${x(p.t).toFixed(1)}" cy="${y(fromKg(p.kg)).toFixed(1)}" r="${p === sel ? 4 : 2.5}" fill="${p.kind === 'scan' ? 'var(--plate-yellow)' : 'var(--muted)'}" opacity="${p === sel ? 1 : .7}"/>`).join('')}
     <path d="${line}" fill="none" stroke="var(--accent)" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>
-    <circle cx="${x(lastP.t)}" cy="${y(fromKg(lastP.trend))}" r="4.5" fill="var(--accent)" stroke="var(--surface)" stroke-width="1.5"/>
-    <text x="${L}" y="${H - 6}">${dl(t0)}</text>${pts.length > 1 ? `<text x="${W - R}" y="${H - 6}" text-anchor="end">${dl(t1)}</text>` : ''}</svg></div>`;
+    <circle cx="${x((sel || lastP).t).toFixed(1)}" cy="${y(fromKg((sel || lastP).trend)).toFixed(1)}" r="4.5" fill="var(--accent)" stroke="var(--surface)" stroke-width="1.5"/>
+    <text x="${L}" y="${H - 6}">${dl(t0)}</text>${pts.length > 1 ? `<text x="${W - R}" y="${H - 6}" text-anchor="end">${dl(t1)}</text>` : ''}</svg>
+    <p class="small num wt-read" style="margin:4px 0 0">${sel
+      ? `<b>${fmtDate(sel.t)}</b> · weighed <b>${f1(fromKg(sel.kg))} ${u}</b>${sel.kind === 'scan' ? ' (scan)' : ''} · trend <b style="color:var(--accent)">${f1(fromKg(sel.trend))} ${u}</b>`
+      : '<span class="muted">Tap the chart to read any day’s weigh-in and trend.</span>'}</p></div>`;
 }
 
 function currentScanIndex(list) {
@@ -2204,6 +2219,13 @@ const A = {
   seg: d => { S.bodySeg = S.bodySeg === d.v ? null : d.v; render(); },
   'scan-compare': d => { S.scanCompare = d.v; render(); },
   'wt-range': d => { S.wtRange = d.v === 'all' ? 'all' : +d.v; render(); },
+  'wt-chart': (d, ev) => {
+    const c = S.wtChart, svg = ev.target.closest('svg'); if (!c || !svg) return;
+    const r = svg.getBoundingClientRect(), vx = (ev.clientX - r.left) / r.width * c.W;
+    const t = c.t0 + (vx - c.x0) / (c.x1 - c.x0) * c.span;
+    const near = c.pts.reduce((a, p) => Math.abs(p.t - t) < Math.abs(a.t - t) ? p : a);
+    S.wtSel = S.wtSel === near.t ? null : near.t; render();
+  },
   'wt-all': () => { S.wtAll = true; S.wtOpen = true; render(); },
   'wt-del': d => { if (!arm('wtdel' + d.v)) return; disarm(); S.body = S.body.filter(e => e.id !== d.v); store.deleteBody(d.v); S.wtOpen = true; render(); toast('Weigh-in deleted'); },
   goal: d => { const g = S.profile.goal || {}; S.profile.goal = {type: d.v, rate: g.rate || (unit() === 'kg' ? 0.25 : 0.5)}; store.saveProfile(); render(); },
