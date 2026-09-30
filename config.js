@@ -3,6 +3,6 @@
 // Both are meant to be public. Row-level security in supabase/setup.sql keeps each person's log private.
 // Leave them empty and Liftbook runs without cloud sync, saving on the device only.
 window.LIFTBOOK_CONFIG = {
-  supabaseUrl: '',
-  supabaseAnonKey: ''
+  supabaseUrl: 'https://obexhwzhzumpgnlyuxav.supabase.co',
+  supabaseAnonKey: 'sb_publishable_Oyy-GVETSgir4iBLj0aaeg_70MjHECm'
 };

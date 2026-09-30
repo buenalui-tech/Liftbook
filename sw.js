@@ -1,6 +1,6 @@
 // Offline support: the app shell is cached so Liftbook opens with no signal (gym basements).
 // Bump VERSION whenever index.html changes so phones pick up the new build.
-const VERSION = 'liftbook-v4';
+const VERSION = 'liftbook-v5';
 const SUPABASE_JS = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.2/dist/umd/supabase.js';
 const SHELL = ['./', './index.html', './config.js', SUPABASE_JS, './manifest.webmanifest', './icon-192.png', './icon-512.png', './apple-touch-icon.png'];
 
