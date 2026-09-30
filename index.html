@@ -269,6 +269,7 @@ input[type=range]{width:100%;accent-color:var(--accent)}
 .fig-wrap{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px;align-items:center}
 @media (max-width:360px){.fig-wrap{grid-template-columns:1fr}}
 .fig-host{height:300px;display:flex;border-radius:10px;background:var(--sunk)}
+.avatar .body-host{height:380px}
 .fig-canvas{width:100%;height:100%;display:block;touch-action:none;cursor:grab}
 .main-sw{background:var(--lean)} .also-sw{background:#F2A0A5}
 .share-preview{display:flex;justify-content:center;align-items:center;min-height:320px;background:var(--sunk);border-radius:12px;padding:12px}
@@ -1273,9 +1274,8 @@ function compareScan(list, idx) {
 function viewAvatarCard() {
   const list = scans();
   if (!list.length) {
-    const ex = scanKg({unit: 'kg', weight: 80, bfm: 14, seg: Object.fromEntries(SEGS.map(({k}) => [k, {lean: REF.lean[k], fat: REF.fat[k]}]))});
     return `<section class="card"><div class="row between"><h3>Body composition</h3><button class="btn primary" data-act="scan-open">+ Add scan</button></div>
-      <div class="avatar-wrap"><div class="avatar">${avatarSVG(ex, null, null, true)}<span class="ex-tag">Example</span></div>
+      <div class="avatar-wrap"><div class="avatar"><div class="fig-host body-host" data-mode="body"></div><span class="ex-tag">Example</span></div>
         <div class="stack small muted"><p style="margin:0">Add an InBody (or similar) scan and this figure is rebuilt from your numbers: each arm, leg and your trunk sized by its muscle, with body fat as the outer layer.</p>
         <div class="legend"><span><i class="lean-sw"></i>Lean mass</span><span><i class="fat-sw"></i>Fat</span></div></div></div></section>`;
   }
@@ -1283,7 +1283,7 @@ function viewAvatarCard() {
   return `<section class="card" id="avatar-card">
     <div class="row between"><h3>Body composition</h3><button class="btn" data-act="scan-open">+ Add scan</button></div>
     <div class="avatar-wrap">
-      <div class="avatar" id="avatar-svg">${avatarSVG(scanKg(cur), cmp ? scanKg(cmp) : null, S.bodySeg)}</div>
+      <div class="avatar" id="avatar-svg"><div class="fig-host body-host" data-mode="body"></div></div>
       <div class="stack" id="avatar-stats" style="gap:10px">${avatarStats(scanKg(cur), cmp ? scanKg(cmp) : null)}</div>
     </div>
     ${list.length > 1 ? `<div class="stack" style="gap:4px">
@@ -1293,6 +1293,7 @@ function viewAvatarCard() {
       <div class="row between"><span class="small muted">Outline shows</span><div class="seg" role="group" aria-label="Compare with">${[['prev', 'Previous scan'], ['first', 'First scan'], ['off', 'Off']].map(([v, l]) => `<button data-act="scan-compare" data-v="${v}" aria-pressed="${(S.scanCompare || 'prev') === v}">${l}</button>`).join('')}</div></div>` : ''}
     <div id="seg-table">${segTable(scanKg(cur), cmp ? scanKg(cmp) : null)}</div>
     <div class="legend small muted"><span><i class="lean-sw"></i>Lean mass</span><span><i class="fat-sw"></i>Fat</span>${cmp ? '<span><i class="ghost-sw"></i>Earlier scan</span>' : ''}</div>
+    <p class="small muted" style="margin:0">Drag to turn the figure. Tap a region, or a row, to highlight it.</p>
   </section>`;
 }
 function delta(v, base, goodUp, digits = 1) {
@@ -1331,9 +1332,11 @@ function viewScanList() {
 
 /* live avatar updates while dragging the scan slider (no full re-render, so the drag isn't interrupted) */
 let tweenRaf = null, shownScan = null;
+const exampleScan = () => scanKg({unit: 'kg', weight: 80, bfm: 14, seg: Object.fromEntries(SEGS.map(({k}) => [k, {lean: REF.lean[k], fat: REF.fat[k]}]))});
 function paintAvatar(sc, cmp) {
   const a = document.getElementById('avatar-svg'); if (!a) return;
-  a.innerHTML = avatarSVG(sc, cmp, S.bodySeg);
+  if (Fig.mode === 'body' && Fig.host && a.contains(Fig.host)) Fig.setBody(sc, cmp, S.bodySeg);
+  else a.innerHTML = avatarSVG(sc, cmp, S.bodySeg);
   document.getElementById('avatar-stats').innerHTML = avatarStats(sc, cmp);
   document.getElementById('seg-table').innerHTML = segTable(sc, cmp);
 }
@@ -1346,15 +1349,17 @@ function showScan(idx) {
   cancelAnimationFrame(tweenRaf);
   if (matchMedia('(prefers-reduced-motion: reduce)').matches) { shownScan = target; paintAvatar(target, cmp); return; }
   const t0 = performance.now();
+  const run = showScan.run = {};   // a newer slider move or the landing timer retires this animation
   const step = now => {
+    if (showScan.run !== run) return;
     const t = Math.min(1, (now - t0) / 350), e = 1 - Math.pow(1 - t, 3);
     shownScan = lerpScan(from, target, e); paintAvatar(shownScan, cmp);
-    if (t < 1) tweenRaf = requestAnimationFrame(step);
+    if (t < 1) tweenRaf = requestAnimationFrame(step); else showScan.run = null;
   };
   tweenRaf = requestAnimationFrame(step);
-  // frames can be paused (backgrounded tab, low-power mode): always land on the chosen scan
+  // frames can be paused or slow (backgrounded tab, low-power mode): always land on the chosen scan
   clearTimeout(showScan.done);
-  showScan.done = setTimeout(() => { if (S.scanIdx === idx) { cancelAnimationFrame(tweenRaf); shownScan = target; paintAvatar(target, cmp); } }, 420);
+  showScan.done = setTimeout(() => { if (showScan.run === run) { showScan.run = null; cancelAnimationFrame(tweenRaf); shownScan = target; paintAvatar(target, cmp); } }, 420);
 }
 
 /* scan entry sheet */
@@ -1532,13 +1537,17 @@ const Fig = {
     const c = this.canvas;
     c.addEventListener('pointerdown', e => { this.drag = {x: e.clientX, y: e.clientY, ry: this.ry, rx: this.rx}; c.setPointerCapture(e.pointerId); });
     c.addEventListener('pointermove', e => { if (!this.drag) return; this.ry = this.drag.ry + (e.clientX - this.drag.x) * 0.012; this.rx = Math.max(-0.35, Math.min(0.35, this.drag.rx + (e.clientY - this.drag.y) * 0.006)); });
-    const up = () => { this.drag = null; this.idle = performance.now(); };
+    const up = e => {
+      const d = this.drag; this.drag = null; this.idle = performance.now();
+      if (d && e && e.type === 'pointerup' && Math.hypot(e.clientX - d.x, e.clientY - d.y) < 6 && this.mode === 'body') this.tap(e);
+    };
     c.addEventListener('pointerup', up); c.addEventListener('pointercancel', up);
   },
   useModel(T, model) {
     this.skin = new T.MeshStandardMaterial({color: 0x7A8490, roughness: 0.75});
     for (const m of MUSCLE_GROUPS) this.mats[m] = new T.MeshStandardMaterial({color: 0x8E97A1, roughness: 0.55, metalness: 0.05});
-    model.traverse(o => { if (o.isMesh) o.material = this.mats[o.name] || this.skin; });
+    this.modelMeshes = [];
+    model.traverse(o => { if (o.isMesh) { o.material = this.mats[o.name] || this.skin; this.modelMeshes.push(o); } });
     this.body.add(model);
   },
   build(T) {
@@ -1573,6 +1582,25 @@ const Fig = {
     pair(null, 0.34, 1.6, 0.34, 0.92, 2.55, 0.18);           // shins
     pair(null, 0.4, 0.22, 0.85, 0.95, 0.35, 0.35);           // feet
   },
+  tap(e) {
+    const T = window.THREE, rect = this.canvas.getBoundingClientRect();
+    const ray = new T.Raycaster(); ray.setFromCamera({x: (e.clientX - rect.left) / rect.width * 2 - 1, y: -((e.clientY - rect.top) / rect.height) * 2 + 1}, this.cam);
+    const shells = Object.values(Comp.shells).filter(m => m.visible);
+    shells.forEach(m => m.geometry.computeBoundingSphere());   // shapes change with the scan; refresh before picking
+    const hit = ray.intersectObjects(shells)[0];
+    if (!hit) return;
+    const k = hit.object.userData.seg; S.bodySeg = S.bodySeg === k ? null : k;
+    this.bodyState.sel = S.bodySeg; Comp.apply(this.bodyState.sc, this.bodyState.ghost, S.bodySeg);
+    const t = document.getElementById('seg-table'); if (t) t.innerHTML = segTable(this.bodyState.sc, this.bodyState.ghost);
+  },
+  // Body tab: every muscle in lean-mass red, with the fat shells from the scan
+  setBody(sc, ghost, sel) {
+    this.bodyState = {sc, ghost, sel};
+    const c = FIG_COLORS[appTheme()];
+    for (const m of MUSCLE_GROUPS) this.mats[m].color.setHex(c.main);
+    this.skin.color.setHex(c.skin);
+    Comp.show(true); Comp.apply(sc, ghost, sel);
+  },
   paint(load, theme) {
     const c = FIG_COLORS[theme];
     for (const m of MUSCLE_GROUPS) this.mats[m].color.setHex(!load[m] ? c.off : load[m].main ? c.main : c.also);
@@ -1583,14 +1611,32 @@ const Fig = {
   attach() {
     const hosts = document.querySelectorAll('.fig-host'), host = hosts[hosts.length - 1];
     if (!host) { this.stop(); return; }
+    if (host.dataset.mode === 'body') return this.attachBody(host);
     const w = S.workouts.find(x => x.id === host.dataset.w); if (!w) return;
     this.ready().then(() => {
       if (!host.isConnected) return;
+      this.mode = 'workout'; Comp.reset();
       this.host = host; this.load = muscleLoad(w);
       host.innerHTML = ''; host.appendChild(this.canvas);
       this.size(host.clientWidth || 300, host.clientHeight || 300); this.paint(this.load, appTheme());
       if (!this.raf) this.loop();
     }).catch(e => { host.innerHTML = `<p class="small muted" style="margin:auto;text-align:center">${esc(e.message)}</p>`; });
+  },
+  attachBody(host) {
+    const list = scans(), example = !list.length;
+    const cur = example ? exampleScan() : scanKg(list[currentScanIndex(list)]);
+    const cmpS = example ? null : compareScan(list, S.scanIdx), cmp = cmpS ? scanKg(cmpS) : null;
+    // the 2D avatar stays as the fallback when 3D can't load (offline on first use, or no model)
+    const fallback = () => { if (host.isConnected) host.parentElement.innerHTML = avatarSVG(cur, cmp, S.bodySeg, example) + (example ? '<span class="ex-tag">Example</span>' : ''); };
+    this.ready().then(() => {
+      if (!host.isConnected) return;
+      if (!Comp.setup(window.THREE, this)) return fallback();
+      this.mode = 'body'; this.host = host;
+      host.innerHTML = ''; host.appendChild(this.canvas);
+      this.size(host.clientWidth || 300, host.clientHeight || 360);
+      this.setBody(shownScan || cur, cmp, S.bodySeg);
+      if (!this.raf) this.loop();
+    }).catch(fallback);
   },
   loop() {
     if (!this.host || !this.host.isConnected) { this.raf = 0; return; }
@@ -1600,13 +1646,153 @@ const Fig = {
   },
   stop() { cancelAnimationFrame(this.raf); this.raf = 0; this.host = null; },
   snapshot(angle, w, h, theme, load) {
-    this.paint(load, theme); this.size(w, h);
+    const wasBody = this.mode === 'body' && this.bodyState;
+    Comp.reset(); this.paint(load, theme); this.size(w, h);
     this.body.rotation.set(0, angle, 0); this.r.render(this.scene, this.cam);
     const url = this.canvas.toDataURL('image/png');
-    if (this.host) { this.size(this.host.clientWidth || 300, this.host.clientHeight || 300); this.paint(this.load, appTheme()); }
+    if (this.host) {
+      this.size(this.host.clientWidth || 300, this.host.clientHeight || 300);
+      if (wasBody) this.setBody(wasBody.sc, wasBody.ghost, wasBody.sel); else this.paint(this.load, appTheme());
+    }
     return url;
   }
 };
+/* ---------- 3D body composition: the InBody avatar on the anatomy figure ----------
+   Each of InBody's 5 regions is sliced along its length. Muscles in a region are scaled around each
+   slice's center by sqrt(lean / reference lean). A see-through fat shell is lofted around the region;
+   its radius over the muscle is sqrt(1 + fat volume / lean volume), the same volume math as the 2D avatar.
+   The model's right side is at -x and it faces +z. */
+const ARM_GROUPS = new Set(['biceps', 'triceps', 'forearms', 'frontDelt', 'sideDelt', 'rearDelt']);
+const LEG_GROUPS = new Set(['quads', 'hamstrings', 'calves']);
+const segKeyOf = (group, x) => ARM_GROUPS.has(group) ? (x < 0 ? 'ra' : 'la') : LEG_GROUPS.has(group) ? (x < 0 ? 'rl' : 'll') : 'tr';
+const SLICES = 26, ANGLES = 28;
+const Comp = {
+  ready: false, parts: [], rings: {}, shells: {}, ghosts: {}, shellMat: null, selMat: null, ghostMat: null,
+  // one-time: remember original vertex positions, sort vertices into regions and slices, measure each slice
+  setup(T, fig) {
+    if (this.ready || !fig.modelMeshes) return this.ready;
+    const acc = {};
+    for (const k of ['ra', 'la', 'tr', 'rl', 'll']) acc[k] = {y0: Infinity, y1: -Infinity, pts: []};
+    for (const mesh of fig.modelMeshes) {
+      if (!MUSCLE_GROUPS.includes(mesh.name)) continue;
+      const pos = mesh.geometry.attributes.position, orig = Float32Array.from(pos.array), keys = new Array(pos.count);
+      for (let i = 0; i < pos.count; i++) {
+        const x = orig[i * 3], y = orig[i * 3 + 1], z = orig[i * 3 + 2], k = segKeyOf(mesh.name, x);
+        keys[i] = k; const a = acc[k]; a.pts.push(x, y, z);
+        if (y < a.y0) a.y0 = y; if (y > a.y1) a.y1 = y;
+      }
+      mesh.frustumCulled = false;   // shapes change every frame while the slider moves
+      this.parts.push({mesh, pos, orig, keys, slice: new Int16Array(pos.count)});
+    }
+    // the trapezius climbs the neck: end the trunk at the shoulders so its shell doesn't hood the head
+    acc.tr.y1 = Math.min(acc.tr.y1, Math.max(acc.ra.y1, acc.la.y1) - 0.2);
+    // the lowest leg slices are ankle tendon: start the legs a little higher
+    for (const k of ['rl', 'll']) acc[k].y0 += (acc[k].y1 - acc[k].y0) * 0.04;
+    for (const [k, a] of Object.entries(acc)) {
+      const n = SLICES, cx = new Float64Array(n), cz = new Float64Array(n), cnt = new Float64Array(n), r = Array.from({length: n}, () => new Float64Array(ANGLES));
+      const si = y => Math.max(0, Math.min(n - 1, Math.floor((y - a.y0) / (a.y1 - a.y0) * n)));
+      for (let i = 0; i < a.pts.length; i += 3) { if (a.pts[i + 1] < a.y0 || a.pts[i + 1] > a.y1) continue; const s = si(a.pts[i + 1]); cx[s] += a.pts[i]; cz[s] += a.pts[i + 2]; cnt[s]++; }
+      for (let s = 0; s < n; s++) if (cnt[s]) { cx[s] /= cnt[s]; cz[s] /= cnt[s]; }
+      // empty slices borrow the nearest filled neighbour's center
+      for (let s = 0; s < n; s++) if (!cnt[s]) { let d = 1; while (d < n) { const t = cnt[s - d] ? s - d : cnt[s + d] ? s + d : -1; if (t >= 0) { cx[s] = cx[t]; cz[s] = cz[t]; break; } d++; } }
+      const inside = y => y >= a.y0 && y <= a.y1;
+      for (let i = 0; i < a.pts.length; i += 3) {
+        if (!inside(a.pts[i + 1])) continue;
+        const s = si(a.pts[i + 1]), dx = a.pts[i] - cx[s], dz = a.pts[i + 2] - cz[s];
+        const b = ((Math.round(Math.atan2(dz, dx) / (2 * Math.PI) * ANGLES) % ANGLES) + ANGLES) % ANGLES, d = Math.hypot(dx, dz);
+        if (d > r[s][b]) r[s][b] = d;
+      }
+      // ignore stray points: cap each direction at 1.4x the slice's typical radius
+      for (const row of r) {
+        const vals = [...row].filter(v => v > 0).sort((p, q) => p - q), med = vals[vals.length >> 1] || 0;
+        if (med) for (let b = 0; b < ANGLES; b++) row[b] = Math.min(row[b], med * 1.4);
+      }
+      // fill gaps and smooth, around each ring and along the length
+      for (let pass = 0; pass < 3; pass++) for (let s = 0; s < n; s++) {
+        const row = r[s], mx = Math.max(...row) || 0.1, nx = new Float64Array(ANGLES);
+        for (let b = 0; b < ANGLES; b++) {
+          const v = row[b] || mx * 0.7, p = row[(b + ANGLES - 1) % ANGLES] || v, q = row[(b + 1) % ANGLES] || v;
+          const up = s > 0 ? (r[s - 1][b] || v) : v, dn = s < n - 1 ? (r[s + 1][b] || v) : v;
+          nx[b] = Math.max(v * 0.5 + (p + q) * 0.15 + (up + dn) * 0.1, v * 0.9);
+        }
+        r[s] = nx;
+      }
+      this.rings[k] = {y0: a.y0, y1: a.y1, cx, cz, r, si};
+    }
+    for (const p of this.parts) for (let i = 0; i < p.pos.count; i++) p.slice[i] = this.rings[p.keys[i]].si(p.orig[i * 3 + 1]);
+    // shells: one lofted tube per region
+    this.shellMat = new T.MeshStandardMaterial({color: 0xF2C94C, transparent: true, opacity: 0.38, roughness: 0.6, depthWrite: false, side: T.DoubleSide});
+    this.selMat = new T.MeshStandardMaterial({color: 0x6A93FF, transparent: true, opacity: 0.42, roughness: 0.6, depthWrite: false, side: T.DoubleSide});
+    this.ghostMat = new T.MeshBasicMaterial({color: 0x9AA4AF, wireframe: true, transparent: true, opacity: 0.22});
+    for (const k of Object.keys(this.rings)) {
+      this.shells[k] = this.tube(T, k, this.shellMat); this.ghosts[k] = this.tube(T, k, this.ghostMat);
+      fig.body.add(this.shells[k]); fig.body.add(this.ghosts[k]);
+    }
+    this.ready = true; this.show(false);
+    return true;
+  },
+  tube(T, k, mat) {
+    const n = SLICES, m = ANGLES, g = new T.BufferGeometry();
+    g.setAttribute('position', new T.BufferAttribute(new Float32Array(n * m * 3), 3));
+    const idx = [];
+    for (let s = 0; s < n - 1; s++) for (let b = 0; b < m; b++) {
+      const a = s * m + b, c = s * m + (b + 1) % m, d = a + m, e = c + m;
+      idx.push(a, d, c, c, d, e);
+    }
+    g.setIndex(idx);
+    const mesh = new T.Mesh(g, mat); mesh.renderOrder = 2; mesh.userData.seg = k; mesh.frustumCulled = false;
+    return mesh;
+  },
+  // shape the muscles and shells for one scan (kg values); ghost = an earlier scan's shells, or null
+  apply(sc, ghost, sel) {
+    if (!this.ready) return;
+    const scale = {}, ratio = {};
+    for (const {k} of SEGS) {
+      const {lean, fat} = sc.seg[k];
+      scale[k] = Math.max(0.6, Math.min(1.6, Math.sqrt(lean / REF.lean[k])));
+      ratio[k] = Math.sqrt(1 + (fat / 0.9) / (lean / 1.06));
+    }
+    for (const p of this.parts) {
+      const a = p.pos.array, o = p.orig;
+      for (let i = 0; i < p.pos.count; i++) {
+        const k = p.keys[i], R = this.rings[k], s = p.slice[i], f = scale[k], j = i * 3;
+        a[j] = R.cx[s] + (o[j] - R.cx[s]) * f; a[j + 1] = o[j + 1]; a[j + 2] = R.cz[s] + (o[j + 2] - R.cz[s]) * f;
+      }
+      p.pos.needsUpdate = true;
+    }
+    for (const k of Object.keys(this.rings)) {
+      this.loft(this.shells[k], k, scale[k], ratio[k]);
+      this.shells[k].material = sel === k ? this.selMat : this.shellMat;
+      if (ghost) {
+        const gl = ghost.seg[k], gs = Math.max(0.6, Math.min(1.6, Math.sqrt(gl.lean / REF.lean[k])));
+        this.loft(this.ghosts[k], k, gs, Math.sqrt(1 + (gl.fat / 0.9) / (gl.lean / 1.06)));
+      }
+      this.ghosts[k].visible = !!ghost && this.on;
+    }
+  },
+  loft(mesh, k, scale, ratio) {
+    const R = this.rings[k], a = mesh.geometry.attributes.position.array, h = R.y1 - R.y0;
+    for (let s = 0; s < SLICES; s++) {
+      const y = R.y0 + (s + 0.5) / SLICES * h, t = (s + 0.5) / SLICES;
+      for (let b = 0; b < ANGLES; b++) {
+        const ang = b / ANGLES * 2 * Math.PI, base = R.r[s][b] * scale;
+        // trunk fat gathers at the belly: thicker around the waist and toward the front
+        const w = k === 'tr' ? 1 + 0.9 * Math.exp(-(((t - 0.3) / 0.16) ** 2)) * (0.45 + 0.55 * Math.max(0, Math.sin(ang))) : 1;
+        const rad = base + base * (ratio - 1) * w + 0.05, j = (s * ANGLES + b) * 3;
+        a[j] = R.cx[s] + Math.cos(ang) * rad; a[j + 1] = y; a[j + 2] = R.cz[s] + Math.sin(ang) * rad;
+      }
+    }
+    mesh.geometry.attributes.position.needsUpdate = true; mesh.geometry.computeVertexNormals();
+  },
+  // back to the untouched anatomy (for workout maps and share images)
+  reset() {
+    if (!this.ready) return;
+    for (const p of this.parts) { p.pos.array.set(p.orig); p.pos.needsUpdate = true; }
+    this.show(false);
+  },
+  show(on) { this.on = on; for (const k of Object.keys(this.shells)) { this.shells[k].visible = on; this.ghosts[k].visible = false; } }
+};
+
 function figureBlock(w) {
   const load = muscleLoad(w), main = mainMuscles(load), also = alsoMuscles(load);
   return `<div class="fig-wrap"><div class="fig-host" data-w="${esc(w.id)}"></div>
