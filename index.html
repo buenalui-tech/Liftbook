@@ -211,6 +211,12 @@ h3{font-family:var(--display);font-weight:600;font-size:20px;line-height:1.1;mar
 .banner{font-size:13px;border-radius:10px;padding:10px 12px;background:var(--warn-soft);color:var(--warn)}
 .empty{text-align:center;padding:28px 16px;color:var(--muted);border:1px dashed var(--line);border-radius:var(--r)}
 .prlist{display:flex;flex-direction:column;gap:6px}
+.syncpill{border:0;border-radius:999px;padding:3px 9px;font-size:12px;font-weight:600;white-space:nowrap;background:var(--sunk);color:var(--muted);min-height:0}
+.syncpill:empty{display:none}
+.syncpill.ok{background:var(--good-soft);color:var(--good)}
+.syncpill.ok::before{content:"✓ "}
+.syncpill.busy{background:var(--accent-soft);color:var(--accent)}
+.syncpill.err{background:var(--pr-soft);color:var(--pr)}
 .toast{position:fixed;left:50%;transform:translateX(-50%);top:calc(12px + env(safe-area-inset-top,0px));z-index:20;background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:10px;font-weight:600;font-size:14px;max-width:calc(100% - 32px)}
 @media (prefers-reduced-motion: no-preference){.set.done{transition:background .2s}.rest .fill{transition:width .25s linear}}
 </style>
@@ -220,6 +226,8 @@ h3{font-family:var(--display);font-weight:600;font-size:20px;line-height:1.1;mar
 <div id="app"><div class="wrap"><div class="brand"><h1>Lift<span>book</span></h1></div><div class="empty">Opening your training log…</div></div></div>
 <div id="toast" class="toast" hidden></div>
 
+<script src="config.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.2/dist/umd/supabase.js"></script>
 <script>
 (() => {
 /* ---------- helpers ---------- */
@@ -289,58 +297,178 @@ const KINDS = ['barbell','dumbbell','machine','cable','bodyweight'];
 const LOWER = new Set(['Quads','Hamstrings','Glutes','Calves']);
 const DEFAULT_PROFILE = {unit:'lb', bar:45, weeklyGoal:4};
 
-/* ---------- storage: private cloud rows when signed in, this device otherwise ---------- */
+/* ---------- storage: this device first, synced to the signed-in Supabase account ---------- */
+// Everything is saved on the phone immediately (works offline); Sync copies changes to the cloud.
+// Keep LS_KEY stable across updates so existing logs keep loading.
 const LS_KEY = 'liftbook.v1';
 const lsRead = () => { try { return JSON.parse(localStorage.getItem(LS_KEY)) || {}; } catch { return {}; } };
 const lsWrite = o => { try { localStorage.setItem(LS_KEY, JSON.stringify(o)); return true; } catch { return false; } };
+const freshMeta = () => ({stamps: {profile: 0, program: 0, active: 0}, userId: null, dirtyS: false, dirtyW: [], delW: [], cursor: null, lastSync: 0});
 
 const store = {
-  mode: 'local', db: null, base: null, chains: {},
-  async init() {
-    try {
-      if (window.claude && typeof window.claude.use === 'function') {
-        const [db, user] = await Promise.all([window.claude.use('db'), window.claude.use('user')]);
-        const uid = user ? await user.id() : null;
-        if (db && uid) { this.db = db; this.base = 'data/users/' + uid; this.mode = 'cloud'; }
-      }
-    } catch (e) { console.warn('storage init', e); }
-  },
-  ref(name) { return this.db.doc(this.base + '/' + name); },
-  col() { return this.ref('profile').collection('workouts'); },
-  async load() {
-    if (this.mode === 'cloud') {
-      try {
-        const [p, pg, a, ws] = await Promise.all([
-          this.ref('profile').get(), this.ref('program').get(), this.ref('active').get(),
-          this.col().orderBy('startedAt', 'desc').limit(1000).get()]);
-        return {
-          profile: p.exists ? p.data() : null,
-          program: pg.exists ? pg.data().program : null,
-          active: a.exists ? a.data().workout || null : null,
-          workouts: ws.docs.map(d => d.data())
-        };
-      } catch (e) { console.warn('cloud load failed, using this device', e); this.mode = 'local'; }
-    }
+  mode: 'local',
+  load() {
     const o = lsRead();
-    return {profile: o.profile || null, program: o.program || null, active: o.active || null, workouts: o.workouts || []};
-  },
-  chain(key, fn) {
-    const next = (this.chains[key] || Promise.resolve()).then(fn).catch(e => {
-      console.warn('save failed', key, e);
-      toast(e && e.code === 'quota_exceeded' ? 'Storage is full. Export and delete old workouts.' : 'Could not save. Check your connection and try again.');
-    });
-    this.chains[key] = next; return next;
+    return {profile: o.profile || null, program: o.program || null, active: o.active || null, workouts: o.workouts || [], meta: {...freshMeta(), ...(o.meta || {})}};
   },
   persistLocal() {
-    if (this.mode !== 'local') return;
-    lsWrite({profile: S.profile, program: S.program, active: S.active, workouts: S.workouts});
+    if (!lsWrite({profile: S.profile, program: S.program, active: S.active, workouts: S.workouts, meta: S.meta}))
+      toast('This phone is out of storage space. Export a backup.');
   },
-  saveProfile() { if (this.mode === 'local') return this.persistLocal(); const d = JSON.parse(JSON.stringify(S.profile)); return this.chain('profile', () => this.ref('profile').set(d)); },
-  saveProgram() { if (this.mode === 'local') return this.persistLocal(); const d = JSON.parse(JSON.stringify(S.program)); return this.chain('program', () => this.ref('program').set({program: d})); },
-  saveActive() { if (this.mode === 'local') return this.persistLocal(); const d = S.active ? JSON.parse(JSON.stringify(S.active)) : null; return this.chain('active', () => this.ref('active').set({workout: d})); },
-  saveWorkout(w) { if (this.mode === 'local') return this.persistLocal(); const d = JSON.parse(JSON.stringify(w)); return this.chain('w:' + w.id, () => this.col().doc(w.id).set(d)); },
-  deleteWorkout(id) { if (this.mode === 'local') return this.persistLocal(); return this.chain('w:' + id, () => this.col().doc(id).delete()); }
+  touch(field) { S.meta.stamps[field] = Date.now(); S.meta.dirtyS = true; S.meta.gen = (S.meta.gen || 0) + 1; },
+  saveProfile() { this.touch('profile'); this.persistLocal(); Sync.schedule(); },
+  saveProgram() { this.touch('program'); this.persistLocal(); Sync.schedule(); },
+  saveActive() { this.touch('active'); this.persistLocal(); Sync.schedule(); },
+  saveWorkout(w) {
+    w.updatedAt = Date.now();
+    if (!S.meta.dirtyW.includes(w.id)) S.meta.dirtyW.push(w.id);
+    S.meta.gen = (S.meta.gen || 0) + 1; this.persistLocal(); Sync.schedule();
+  },
+  deleteWorkout(id) {
+    S.meta.dirtyW = S.meta.dirtyW.filter(x => x !== id);
+    if (!S.meta.delW.includes(id)) S.meta.delW.push(id);
+    S.meta.gen = (S.meta.gen || 0) + 1; this.persistLocal(); Sync.schedule();
+  }
 };
+
+/* ---------- cloud sync (Supabase) ---------- */
+const CFG = window.LIFTBOOK_CONFIG || {};
+const Sync = {
+  client: null, user: null, status: 'off', detail: '', busy: false, again: false, timer: null,
+  configured() { return !!(CFG.supabaseUrl && CFG.supabaseAnonKey && window.supabase && window.supabase.createClient); },
+  async init() {
+    if (!this.configured()) return;
+    try {
+      this.client = window.supabase.createClient(CFG.supabaseUrl, CFG.supabaseAnonKey, {auth: {persistSession: true, autoRefreshToken: true, detectSessionInUrl: true}});
+      const {data} = await this.client.auth.getSession();
+      this.user = data.session ? data.session.user : null;
+    } catch (e) { console.warn('sync init', e); return; }
+    // Supabase warns against awaiting its own calls inside this callback, so hand off with setTimeout
+    this.client.auth.onAuthStateChange((_ev, session) => {
+      const u = session ? session.user : null, changed = (u && u.id) !== (this.user && this.user.id);
+      this.user = u;
+      if (changed) setTimeout(() => { u ? this.onSignedIn() : this.set('off'); render(); }, 0);
+    });
+    window.addEventListener('online', () => this.run(true));
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') this.run(true); });
+    if (this.user) this.onSignedIn();
+  },
+  onSignedIn() {
+    if (S.meta.userId && S.meta.userId !== this.user.id) {
+      // a different account on this phone: start from that account's cloud log
+      S.workouts = []; S.active = null; S.program = JSON.parse(JSON.stringify(TEMPLATE)); S.profile = {...DEFAULT_PROFILE};
+      S.meta = freshMeta();
+    }
+    if (!S.meta.userId) {
+      // first link on this phone: everything already logged here gets uploaded
+      S.meta.dirtyW = [...new Set([...S.meta.dirtyW, ...S.workouts.map(w => w.id)])];
+      S.meta.dirtyS = true;
+    }
+    S.meta.userId = this.user.id; store.persistLocal();
+    this.run(true);
+  },
+  set(status, detail = '') {
+    this.status = status; this.detail = detail;
+    document.querySelectorAll('.syncpill').forEach(el => { el.outerHTML = syncPill(); });
+    const st = document.getElementById('sync-status'); if (st) st.textContent = syncStatusText();
+  },
+  schedule(ms = 1500) { if (!this.user) return; clearTimeout(this.timer); this.timer = setTimeout(() => this.run(false), ms); },
+  async run(pull) {
+    if (!this.client || !this.user) return;
+    if (!navigator.onLine) { this.set('offline'); return; }
+    if (this.busy) { this.again = true; this.againPull = this.againPull || pull; return; }
+    this.busy = true; this.set('saving');
+    try {
+      if (pull) await this.pull();
+      await this.push();
+      S.meta.lastSync = Date.now(); store.persistLocal(); this.set('idle');
+    } catch (e) {
+      console.warn('sync', e);
+      this.set(navigator.onLine ? 'error' : 'offline', (e && e.message) || '');
+      // weak gym signal often never fires an 'online' event, so keep retrying quietly
+      clearTimeout(this.retry); this.retry = setTimeout(() => this.run(true), 30000);
+    } finally {
+      this.busy = false;
+      if (this.again) { const p = this.againPull; this.again = false; this.againPull = false; setTimeout(() => this.run(p), 300); }
+    }
+  },
+  async pull() {
+    const uid = this.user.id; let changed = false;
+    const st = await this.client.from('user_state').select('*').eq('user_id', uid).maybeSingle();
+    if (st.error) throw st.error;
+    if (st.data) {
+      for (const f of ['profile', 'program', 'active']) {
+        const at = Number(st.data[f + '_at']) || 0;
+        if (at > (S.meta.stamps[f] || 0)) {
+          if (f === 'profile') S.profile = {...DEFAULT_PROFILE, ...(st.data.profile || {})};
+          if (f === 'program' && st.data.program) S.program = st.data.program;
+          if (f === 'active') { S.active = st.data.active || null; if (!S.active && S.screen === 'workout') S.screen = 'tabs'; }
+          S.meta.stamps[f] = at; changed = true;
+        }
+      }
+    } else S.meta.dirtyS = true;
+    // workouts changed on the server since the last pull (server-stamped, so phone clocks don't matter)
+    for (let from = 0; ; from += 1000) {
+      let q = this.client.from('workouts').select('id,updated_at,deleted,data,synced_at').eq('user_id', uid).order('synced_at').range(from, from + 999);
+      if (S.meta.cursor) q = q.gt('synced_at', S.meta.cursor);
+      const {data, error} = await q; if (error) throw error;
+      for (const row of data) {
+        const i = S.workouts.findIndex(w => w.id === row.id), local = S.workouts[i];
+        if (row.deleted) { if (local) { S.workouts.splice(i, 1); changed = true; } S.meta.dirtyW = S.meta.dirtyW.filter(x => x !== row.id); }
+        else if (!local || Number(row.updated_at) > (local.updatedAt || local.startedAt)) {
+          if (local) S.workouts[i] = row.data; else S.workouts.push(row.data);
+          S.meta.dirtyW = S.meta.dirtyW.filter(x => x !== row.id); changed = true;
+        }
+        if (!S.meta.cursor || row.synced_at > S.meta.cursor) S.meta.cursor = row.synced_at;
+      }
+      if (data.length < 1000) break;
+    }
+    if (changed) {
+      S.workouts.sort((a, b) => b.startedAt - a.startedAt); store.persistLocal();
+      // don't redraw under the lifter's thumbs mid-set unless the workout itself changed
+      if (S.screen !== 'workout' || !S.active) render();
+    }
+  },
+  async push() {
+    const uid = this.user.id, gen = S.meta.gen || 0;
+    const wIds = [...S.meta.dirtyW], dIds = [...S.meta.delW], state = S.meta.dirtyS;
+    if (state) {
+      const {error} = await this.client.from('user_state').upsert({
+        user_id: uid, profile: S.profile, program: S.program, active: S.active,
+        profile_at: S.meta.stamps.profile || 0, program_at: S.meta.stamps.program || 0, active_at: S.meta.stamps.active || 0
+      }, {onConflict: 'user_id'});
+      if (error) throw error;
+    }
+    const rows = wIds.map(id => S.workouts.find(w => w.id === id)).filter(Boolean)
+      .map(w => ({user_id: uid, id: w.id, started_at: w.startedAt, updated_at: w.updatedAt || w.startedAt, deleted: false, data: w}))
+      .concat(dIds.map(id => ({user_id: uid, id, started_at: 0, updated_at: Date.now(), deleted: true, data: null})));
+    for (let i = 0; i < rows.length; i += 200) {
+      const {error} = await this.client.from('workouts').upsert(rows.slice(i, i + 200), {onConflict: 'user_id,id'});
+      if (error) throw error;
+    }
+    // clear only what was sent; anything changed mid-push stays queued for the next run
+    S.meta.dirtyW = S.meta.dirtyW.filter(x => !wIds.includes(x));
+    S.meta.delW = S.meta.delW.filter(x => !dIds.includes(x));
+    if (state && (S.meta.gen || 0) === gen) S.meta.dirtyS = false;
+    if ((S.meta.gen || 0) !== gen) this.again = true;
+  },
+  async signIn(email, password) { return this.client.auth.signInWithPassword({email, password}); },
+  async signUp(email, password) { return this.client.auth.signUp({email, password, options: {emailRedirectTo: location.href.split('#')[0]}}); },
+  async signOut() { await this.client.auth.signOut(); this.user = null; this.set('off'); }
+};
+function syncPill() {
+  if (!Sync.user) return '<span class="syncpill"></span>';
+  const map = {idle: ['ok', 'Synced'], saving: ['busy', 'Syncing…'], offline: ['off', 'Offline · saved on phone'], error: ['err', 'Sync problem'], off: ['off', '']};
+  const [cls, label] = map[Sync.status] || map.off;
+  return label ? `<button class="syncpill ${cls}" data-act="tab" data-v="program">${label}</button>` : '<span class="syncpill"></span>';
+}
+function syncStatusText() {
+  if (Sync.status === 'error') return 'Last sync failed: ' + (Sync.detail || 'unknown error') + '. Your log is safe on this phone.';
+  if (Sync.status === 'offline') return 'Offline. Changes are saved on this phone and upload when you reconnect.';
+  if (Sync.status === 'saving') return 'Syncing…';
+  return S.meta.lastSync ? 'Last synced ' + new Date(S.meta.lastSync).toLocaleString(undefined, {month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'}) : 'Not synced yet.';
+}
+
 const debounced = {};
 const pending = {};
 function later(key, fn, ms = 700) {
@@ -358,7 +486,8 @@ const saveProgramSoon = () => later('program', () => store.saveProgram());
 const S = {
   ready: false, profile: {...DEFAULT_PROFILE}, program: null, workouts: [], active: null,
   tab: 'today', screen: 'tabs', sheet: null, menuEx: null, editRoutine: null,
-  progressEx: null, rest: null, armed: null, summary: null
+  progressEx: null, rest: null, armed: null, summary: null,
+  meta: freshMeta(), authEmail: '', authMsg: '', authBusy: false
 };
 
 /* ---------- training math ---------- */
@@ -556,12 +685,12 @@ function viewTabs() {
   const t = (id, label, icon) => `<button data-act="tab" data-v="${id}" ${S.tab === id ? 'aria-current="page"' : ''}>${ICON[icon]}<span>${label}</span></button>`;
   return `<div class="tabs"><nav>${t('today','Today','today')}${t('history','History','hist')}${t('progress','Progress','prog')}${t('program','Program','plan')}</nav></div>`;
 }
-function brand(sub) { return `<div class="brand"><h1>Lift<span>book</span></h1><small>${sub || ''}</small></div>`; }
+function brand(sub) { return `<div class="brand"><h1>Lift<span>book</span></h1><div class="row" style="gap:8px">${syncPill()}<small>${sub || ''}</small></div></div>`; }
 const IN_CLAUDE = !!(window.claude && typeof window.claude.use === 'function');
 function storageBanner() {
-  if (store.mode !== 'local') return '';
-  if (IN_CLAUDE) return `<div class="banner">Saving to this device only. Sign in to claude.ai to keep your log in your account across devices.</div>`;
-  // standalone: the log lives on this phone, so nudge a backup every two weeks
+  if (Sync.user) return '';
+  if (Sync.client && S.workouts.length) return `<div class="banner row between"><span>Your log is only on this phone. Sign in to back it up automatically.</span><button class="btn" data-act="tab" data-v="program" style="min-height:36px">Sign in</button></div>`;
+  // no cloud account: the log lives on this phone, so nudge a backup every two weeks
   const last = S.profile.lastBackup || 0;
   if (S.workouts.length && Date.now() - last > 14 * DAY)
     return `<div class="banner row between"><span>Your log lives on this phone only. ${last ? 'Last backup ' + fmtDate(last) + '.' : 'You haven’t backed it up yet.'}</span><button class="btn" data-act="export-json" style="min-height:36px">Back up</button></div>`;
@@ -791,11 +920,45 @@ function viewProgram() {
       <div class="row between"><label for="set-goal">Sessions per week</label><input id="set-goal" data-in="goal" inputmode="numeric" value="${S.profile.weeklyGoal || 4}" style="width:90px;height:40px;text-align:center;border:1px solid var(--line);border-radius:8px;background:var(--sunk)"></div>
       <p class="small muted">Past workouts keep the unit they were logged in and are converted for display.</p>
     </section>
-    <section class="card"><h3>Your data</h3>
-      <p class="small muted">${store.mode === 'cloud' ? 'Your log is saved privately to your claude.ai account. Nobody else who opens this page can see it.' : 'Your log is saved on this device only, and never leaves it. Export a backup now and then, and use Import to move your log to a new phone.'}</p>
+    ${viewAccount()}
+    <section class="card"><h3>Backups</h3>
+      <p class="small muted">${Sync.user ? 'Your log syncs to your account automatically. Exports are an extra copy you keep yourself.' : 'Export a backup now and then, and use Import to move your log to a new phone.'}</p>
       <div class="row" style="flex-wrap:wrap"><button class="btn" data-act="export-json">Export backup (.json)</button><button class="btn" data-act="export-csv">Export sets (.csv)</button><label class="btn" for="import-file">Import backup</label><input type="file" id="import-file" accept=".json,application/json" hidden></div>
       <button class="btn danger ${S.armed === 'reset' ? 'armed' : ''}" data-act="reset-program">${S.armed === 'reset' ? 'Tap again to reset program' : 'Reset program to Jeff Nippard 4-Day UL'}</button>
     </section>`;
+}
+
+function viewAccount() {
+  if (!Sync.client) return `<section class="card"><h3>Account &amp; sync</h3><p class="small muted">${Sync.configured() || (CFG.supabaseUrl && CFG.supabaseAnonKey)
+    ? 'Cloud sync can’t load right now (probably no signal). Your log is saved on this phone.'
+    : 'Cloud sync isn’t set up yet. Your log is saved on this phone.'}</p></section>`;
+  if (Sync.user) return `<section class="card"><h3>Account &amp; sync</h3>
+    <div class="stack"><span>Signed in as <b>${esc(Sync.user.email || '')}</b></span><span class="small muted" id="sync-status">${esc(syncStatusText())}</span></div>
+    <p class="small muted">Every change saves on this phone first, then uploads to your account. Sign in on another phone or computer to see the same log.</p>
+    <div class="row" style="flex-wrap:wrap"><button class="btn" data-act="sync-now">Sync now</button><button class="btn ${S.armed === 'signout' ? 'danger armed' : ''}" data-act="sign-out">${S.armed === 'signout' ? 'Tap again to sign out' : 'Sign out'}</button></div>
+  </section>`;
+  return `<section class="card"><h3>Account &amp; sync</h3>
+    <p class="small muted">Sign in to back up your log automatically and use it on more than one device.${S.workouts.length ? ` The ${S.workouts.length} workout${S.workouts.length === 1 ? '' : 's'} on this phone will upload to your account.` : ''}</p>
+    <form id="auth-form" class="stack" style="gap:10px" autocomplete="on">
+      <label class="field">Email<input id="auth-email" data-in="auth-email" type="email" autocomplete="email" autocapitalize="off" value="${esc(S.authEmail)}" required></label>
+      <label class="field">Password<input id="auth-pw" type="password" autocomplete="current-password" minlength="6" required></label>
+      ${S.authMsg ? `<p class="small" style="margin:0;color:${S.authMsg.startsWith('✓') ? 'var(--good)' : 'var(--pr)'}">${esc(S.authMsg)}</p>` : ''}
+      <div class="row"><button class="btn primary grow" type="submit" data-mode="in" ${S.authBusy ? 'disabled' : ''}>Sign in</button><button class="btn grow" type="submit" data-mode="up" ${S.authBusy ? 'disabled' : ''}>Create account</button></div>
+    </form>
+  </section>`;
+}
+async function authSubmit(mode) {
+  const email = (document.getElementById('auth-email').value || '').trim(), pw = document.getElementById('auth-pw').value || '';
+  S.authEmail = email;
+  if (!email || pw.length < 6) { S.authMsg = 'Enter your email and a password of at least 6 characters.'; render(); return; }
+  S.authBusy = true; S.authMsg = ''; render();
+  try {
+    const {data, error} = mode === 'up' ? await Sync.signUp(email, pw) : await Sync.signIn(email, pw);
+    if (error) S.authMsg = error.message === 'Invalid login credentials' ? 'That email and password don’t match. Created your account already? Confirm it from the email first.' : error.message;
+    else if (mode === 'up' && !data.session) S.authMsg = '✓ Account created. Open the confirmation email, then come back here and sign in.';
+    else S.authMsg = '';
+  } catch (e) { S.authMsg = navigator.onLine ? 'Couldn’t reach the server. Try again in a moment.' : 'You’re offline. Connect to the internet to sign in.'; }
+  S.authBusy = false; render();
 }
 
 /* ---------- events ---------- */
@@ -834,6 +997,8 @@ const A = {
   detail: d => { S.sheet = {type:'detail', id:d.v}; render(); },
   'del-workout': d => { if (!arm('del' + d.v)) return; disarm(); S.workouts = S.workouts.filter(w => w.id !== d.v); S.sheet = null; store.deleteWorkout(d.v); render(); toast('Workout deleted'); },
   'dismiss-summary': () => { S.summary = null; render(); },
+  'sync-now': () => Sync.run(true),
+  'sign-out': async () => { if (!arm('signout')) return; disarm(); await Sync.signOut(); S.authMsg = '✓ Signed out. Your log stays on this phone.'; render(); },
   'edit-routine': d => { S.editRoutine = d.v || null; disarm(); render(); },
   'p-up': d => { const xs = S.program.routines[+d.r].exercises, i = +d.x; if (i > 0) { [xs[i - 1], xs[i]] = [xs[i], xs[i - 1]]; saveProgramSoon(); render(); } },
   'p-rm': d => { if (!arm(`prm${d.r}-${d.x}`)) return; disarm(); S.program.routines[+d.r].exercises.splice(+d.x, 1); saveProgramSoon(); render(); },
@@ -896,6 +1061,7 @@ document.addEventListener('input', ev => {
     if (f === 'name') { const nm = el.value.trim(); if (nm) { ex.name = nm; ex.id = slug(nm); } }
     else { const n = parseInt(el.value, 10); if (n > 0) ex[f] = n; if (ex.repMax < ex.repMin && f !== 'rest' && f !== 'sets') {} }
     saveProgramSoon();
+  } else if (k === 'auth-email') { S.authEmail = el.value;
   } else if (k === 'bar') { const n = parseFloat(el.value); if (n >= 0) { S.profile.bar = n; later('profile', () => store.saveProfile()); } }
   else if (k === 'goal') { const n = parseInt(el.value, 10); if (n > 0 && n < 15) { S.profile.weeklyGoal = n; later('profile', () => store.saveProfile()); } }
 });
@@ -905,32 +1071,38 @@ document.addEventListener('change', ev => {
   if (el.dataset && el.dataset.in && el.dataset.in.startsWith('p-')) render();
   if (el.id === 'import-file' && el.files && el.files[0]) importFile(el.files[0]);
 });
+document.addEventListener('submit', ev => {
+  if (ev.target.id !== 'auth-form') return;
+  ev.preventDefault();
+  authSubmit(ev.submitter && ev.submitter.dataset.mode === 'up' ? 'up' : 'in');
+});
 async function importFile(file) {
   try {
     const o = JSON.parse(await file.text());
     if (!o || !Array.isArray(o.workouts)) throw new Error('bad');
     const have = new Set(S.workouts.map(w => w.id)); let added = 0;
-    for (const w of o.workouts) if (w && w.id && Array.isArray(w.exercises) && !have.has(w.id)) { S.workouts.push(w); added++; if (store.mode === 'cloud') await store.saveWorkout(w); }
+    for (const w of o.workouts) if (w && w.id && Array.isArray(w.exercises) && !have.has(w.id)) { S.workouts.push(w); added++; store.saveWorkout(w); }
     S.workouts.sort((a, b) => b.startedAt - a.startedAt);
-    if (o.program && Array.isArray(o.program.routines)) { S.program = o.program; await store.saveProgram(); }
-    if (o.profile && o.profile.unit) { S.profile = {...DEFAULT_PROFILE, ...o.profile}; await store.saveProfile(); }
+    if (o.program && Array.isArray(o.program.routines)) { S.program = o.program; store.saveProgram(); }
+    if (o.profile && o.profile.unit) { S.profile = {...DEFAULT_PROFILE, ...o.profile}; store.saveProfile(); }
     store.persistLocal(); render(); toast(`Imported ${added} workout${added === 1 ? '' : 's'}`);
   } catch { toast('That file is not a Liftbook backup.'); }
 }
 
 /* ---------- boot ---------- */
 (async () => {
-  await store.init();
-  const d = await store.load();
+  const d = store.load();
+  S.meta = d.meta;
   S.profile = {...DEFAULT_PROFILE, ...(d.profile || {})};
   S.program = d.program || JSON.parse(JSON.stringify(TEMPLATE));
   S.workouts = (d.workouts || []).sort((a, b) => b.startedAt - a.startedAt);
   S.active = d.active || null;
-  if (!d.program) store.saveProgram();
-  if (!d.profile) store.saveProfile();
+  // defaults keep a zero timestamp so they never overwrite a program already saved in the cloud
+  if (!d.program || !d.profile) store.persistLocal();
   S.ready = true; render();
   // ask the browser not to evict the log when storage runs low
-  try { if (store.mode === 'local' && navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch {}
+  try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch {}
+  await Sync.init(); render();
 })();
 })();
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
