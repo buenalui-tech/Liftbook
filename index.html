@@ -301,6 +301,10 @@ label.hitem{cursor:pointer}
 .wl-dots{display:flex;gap:6px;justify-content:center}
 .wl-dots i{width:8px;height:8px;border-radius:50%;background:var(--line)}
 .wl-dots i.on{background:var(--accent);width:22px;border-radius:4px}
+.steps{margin:0;padding-left:22px;display:flex;flex-direction:column;gap:8px}
+.steps li{padding-left:4px}
+.ios-share{width:18px;height:18px;vertical-align:-3px;color:var(--accent)}
+.install-card{border-color:var(--accent)}
 .toast{position:fixed;left:50%;transform:translateX(-50%);top:calc(12px + env(safe-area-inset-top,0px));z-index:20;background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:10px;font-weight:600;font-size:14px;max-width:calc(100% - 32px)}
 @media (prefers-reduced-motion: no-preference){.set.done{transition:background .2s}.rest .fill{transition:width .25s linear}}
 </style>
@@ -315,7 +319,7 @@ label.hitem{cursor:pointer}
 <script>
 (() => {
 /* ---------- helpers ---------- */
-const APP_VERSION = '17';   // keep in step with VERSION in sw.js (liftbook-v17)
+const APP_VERSION = '18';   // keep in step with VERSION in sw.js (liftbook-v18)
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 const slug = s => String(s).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'exercise';
@@ -947,6 +951,7 @@ function viewToday() {
   const weigh = S.body.find(e => e.kind === 'weight' && startOfDay(e.date) === day);
   return `${brand(new Date().toLocaleDateString(undefined, {weekday:'long', month:'long', day:'numeric'}))}
     ${storageBanner()}
+    ${isToday && shouldOfferInstall() ? installCard(false) : ''}
     ${isToday ? summaryCard() : ''}
     <section class="section" id="day-swipe">
       <div class="row between"><p class="eyebrow">${wk === startOfWeek(today) ? 'This week' : 'Week of ' + new Date(wk).toLocaleDateString(undefined, {month: 'short', day: 'numeric'})}</p><span class="small muted num">${strengthThisWeek} of ${goal} lifting sessions this week</span></div>
@@ -2333,6 +2338,42 @@ async function shareGo() {
   toast('Image saved');
 }
 
+/* ---------- add to Home Screen prompt (until Liftbook is in the app stores) ---------- */
+const UA = navigator.userAgent;
+const isStandalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+const isIOS = () => /iPad|iPhone|iPod/.test(UA) || (/Macintosh/.test(UA) && navigator.maxTouchPoints > 1);
+const isAndroid = () => /Android/.test(UA);
+const inAppBrowser = () => /FBAN|FBAV|Instagram|Line\/|Snapchat|TikTok|LinkedInApp|Twitter/i.test(UA);
+const INSTALL_KEY = 'liftbook.installDismissed';
+const installDismissed = () => { try { return localStorage.getItem(INSTALL_KEY) === '1'; } catch { return false; } };
+const shouldOfferInstall = () => !isStandalone() && (isIOS() || isAndroid()) && !installDismissed();
+let installEvent = null;
+// Android Chrome offers a real install dialog; keep it for the button
+window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); installEvent = e; if (S.ready) render(); });
+window.addEventListener('appinstalled', () => { installEvent = null; try { localStorage.setItem(INSTALL_KEY, '1'); } catch {} if (S.ready) render(); });
+const SHARE_ICON = '<svg class="ios-share" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-label="Share"><path d="M12 3v12M8 7l4-4 4 4"/><path d="M6 11v9h12v-9"/></svg>';
+function installSteps() {
+  if (inAppBrowser()) return `<p style="margin:0">This page opened inside another app, which can't add it to your Home Screen. Open it in ${isIOS() ? 'Safari' : 'Chrome'} first:</p>
+    <ol class="steps"><li>Tap the <b>•••</b> or <b>⋮</b> menu in this app's browser</li><li>Choose <b>Open in ${isIOS() ? 'Safari' : 'browser'}</b></li><li>Come back to these steps there</li></ol>`;
+  if (isIOS()) {
+    const safari = !/CriOS|FxiOS|EdgiOS/.test(UA);
+    return `<ol class="steps">
+      <li>Tap the Share button ${SHARE_ICON} ${safari ? 'at the bottom of Safari (on newer iPhones it’s inside the <b>•••</b> menu)' : 'next to the address bar'}</li>
+      <li>Scroll down and tap <b>Add to Home Screen</b></li>
+      <li>Tap <b>Add</b>, then open <b>Liftbook</b> from your Home Screen and continue there</li></ol>`;
+  }
+  return installEvent
+    ? `<button class="btn primary block" data-act="install-now">Install Liftbook</button><p class="small muted" style="margin:0">Then open it from your Home Screen and continue there.</p>`
+    : `<ol class="steps"><li>Tap <b>⋮</b> at the top right of Chrome</li><li>Tap <b>Add to Home screen</b> or <b>Install app</b></li><li>Open <b>Liftbook</b> from your Home Screen and continue there</li></ol>`;
+}
+function installCard(inWelcome) {
+  return `<section class="card install-card">
+    <div class="row between"><h3>Add Liftbook to your Home Screen</h3>${inWelcome ? '' : '<button class="iconbtn" data-act="install-dismiss" aria-label="Dismiss">✕</button>'}</div>
+    <p class="small muted" style="margin:0">It opens full screen like an app, works without signal at the gym, and keeps your log safe.</p>
+    ${installSteps()}
+  </section>`;
+}
+
 /* ---------- feedback and crash reports ----------
    Both go through a small outbox in browser storage, so nothing is lost offline; it empties into
    Supabase (insert-only tables, see supabase/003_feedback_and_errors.sql) whenever it can. */
@@ -2393,6 +2434,11 @@ async function sendFeedback() {
 /* ---------- first-run welcome: units, account, program ---------- */
 const needsWelcome = () => !S.profile.onboarded && !S.program && !S.workouts.length && !S.body.length;
 function viewWelcome() {
+  if (shouldOfferInstall() && !S.welcomeInBrowser) return `<div class="wrap welcome">
+      <h1 class="wl-title">Welcome to Lift<span>book</span></h1>
+      <p class="muted" style="margin:0">Before you set up, add Liftbook to your Home Screen and continue from there. ${isIOS() ? 'On iPhone, the Home Screen app keeps its own storage, so setting up in Safari first would have to be redone.' : ''}</p>
+      ${installCard(true)}
+      <button class="btn block" data-act="wl-browser">Continue in the browser instead</button></div>`;
   let step = S.welcomeStep || 0;
   if (step === 1 && Sync.user) step = S.welcomeStep = 2;   // signed in: move on
   if (step === 1 && !Sync.client) step = S.welcomeStep = 2; // no cloud sync available
@@ -2490,6 +2536,9 @@ const A = {
   'fb-send': () => sendFeedback(),
   'wl-next': () => { S.welcomeStep = (S.welcomeStep || 0) + 1; render(); window.scrollTo(0, 0); },
   'wl-done': () => finishWelcome(),
+  'wl-browser': () => { S.welcomeInBrowser = true; render(); },
+  'install-now': async () => { if (!installEvent) return; installEvent.prompt(); try { await installEvent.userChoice; } catch {} installEvent = null; render(); },
+  'install-dismiss': () => { try { localStorage.setItem(INSTALL_KEY, '1'); } catch {} render(); },
   'share-open': d => { S.sheet = {type: 'share', id: d.v}; render(); prepareShare(); },
   'share-theme': d => { if ((S.profile.shareTheme || 'dark') === d.v) return; S.profile.shareTheme = d.v; store.saveProfile(); const sh = S.sheet; if (sh.url) URL.revokeObjectURL(sh.url); sh.url = null; sh.blob = null; render(); prepareShare(); },
   'share-go': () => shareGo(),
