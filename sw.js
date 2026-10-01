@@ -1,6 +1,6 @@
 // Offline support: the app shell is cached so Liftbook opens with no signal (gym basements).
 // Bump VERSION whenever index.html changes so phones pick up the new build.
-const VERSION = 'liftbook-v16';
+const VERSION = 'liftbook-v17';
 const SUPABASE_JS = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.2/dist/umd/supabase.js';
 const THREE_JS = 'https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js';
 const GLTF_JS = 'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js';

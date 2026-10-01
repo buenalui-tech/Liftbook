@@ -11,15 +11,24 @@
       gt(c, v) { st.filters.push(r => r[c] > v); return api; }, order(c) { st.order = c; return api; },
       range(a, b) { st.range = [a, b]; return api; }, maybeSingle() { st.single = true; return api; },
       upsert(rows, o) { st.op = 'upsert'; st.rows = [].concat(rows); st.on = o.onConflict.split(','); return api; },
+      insert(rows) { st.op = 'insert'; st.rows = [].concat(rows); return api; },
       then(res, rej) { return Promise.resolve().then(exec).then(res, rej); }
     };
     function exec() {
       window.MOCK_CALLS = (window.MOCK_CALLS || 0) + 1;
       if (window.MOCK_OFFLINE) return {data: null, error: {message: 'Failed to fetch'}};
-      const d = load(), uid = getUid(); if (!uid) return {data: null, error: {message: 'JWT missing'}};
+      const d = load(), uid = getUid();
       const t = d[table];
       // like PostgREST when setup SQL hasn't created the table yet
       if (!t) return {data: null, error: {code: 'PGRST205', message: `Could not find the table 'public.${table}' in the schema cache`}};
+      if (st.op === 'insert') {   // insert-only tables: anyone may add, rows must not claim someone else
+        for (const r of st.rows) {
+          if (r.user_id && r.user_id !== uid) return {data: null, error: {message: 'new row violates row-level security policy'}};
+          t.push({...JSON.parse(JSON.stringify(r)), id: 'r' + (++seq), created_at: new Date().toISOString(), user_id: uid || null});
+        }
+        save(d); return {data: null, error: null};
+      }
+      if (!uid) return {data: null, error: {message: 'JWT missing'}};
       if (st.op === 'upsert') {
         for (const r of st.rows) {
           if (r.user_id !== uid) return {data: null, error: {message: 'new row violates row-level security policy'}};

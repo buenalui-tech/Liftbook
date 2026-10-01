@@ -294,6 +294,13 @@ input[type=range]{width:100%;accent-color:var(--accent)}
 .ed-set .lbl.warm{color:var(--warn)}
 .day-edit{padding:12px 0;border-top:1px solid var(--line);gap:10px}
 label.hitem{cursor:pointer}
+.field textarea{border:1px solid var(--line);border-radius:8px;background:var(--sunk);padding:10px;font-size:16px;font-weight:500;color:var(--ink);resize:vertical;min-height:120px;font-family:var(--body)}
+.welcome{padding-top:28px;gap:16px}
+.wl-title{font-family:var(--display);font-size:40px;line-height:1;margin:0;text-transform:uppercase}
+.wl-title span{color:var(--accent)}
+.wl-dots{display:flex;gap:6px;justify-content:center}
+.wl-dots i{width:8px;height:8px;border-radius:50%;background:var(--line)}
+.wl-dots i.on{background:var(--accent);width:22px;border-radius:4px}
 .toast{position:fixed;left:50%;transform:translateX(-50%);top:calc(12px + env(safe-area-inset-top,0px));z-index:20;background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:10px;font-weight:600;font-size:14px;max-width:calc(100% - 32px)}
 @media (prefers-reduced-motion: no-preference){.set.done{transition:background .2s}.rest .fill{transition:width .25s linear}}
 </style>
@@ -308,6 +315,7 @@ label.hitem{cursor:pointer}
 <script>
 (() => {
 /* ---------- helpers ---------- */
+const APP_VERSION = '17';   // keep in step with VERSION in sw.js (liftbook-v17)
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 const slug = s => String(s).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'exercise';
@@ -841,13 +849,22 @@ function render() {
   const keep = {}, focused = document.activeElement && document.activeElement.id;
   document.querySelectorAll('#wt-in, #wt-date, #scan-form input, #scan-form select').forEach(el => { keep[el.id] = el.value; });
   let html = '';
-  if (S.screen === 'workout' && S.active) html = viewWorkout();
+  try {
+  if (S.screen === 'welcome') html = viewWelcome();
+  else if (S.screen === 'workout' && S.active) html = viewWorkout();
   else {
     html = `<div class="wrap">${
       S.tab === 'today' ? viewToday() : S.tab === 'history' ? viewHistory() : S.tab === 'progress' ? viewProgress() : S.tab === 'body' ? viewBody() : viewProgram()
     }</div>${S.active ? `<div class="resume"><button data-act="resume"><span>Resume ${esc(S.active.routineName)}</span><span class="num" id="resume-clock">${fmtDur((Date.now() - S.active.startedAt) / 1000)}</span></button></div>` : ''}${viewTabs()}`;
   }
   html += viewSheet();
+  } catch (e) {
+    reportError('Render failed: ' + e.message, e.stack);
+    html = `<div class="wrap"><div class="empty" style="text-align:left"><h3>Something went wrong on this screen</h3>
+      <p class="small">Your data is safe. The problem has been reported automatically.</p>
+      <button class="btn primary" onclick="location.reload()">Reload</button> <button class="btn" data-act="tab" data-v="today">Go to Today</button></div></div>`;
+    S.sheet = null;
+  }
   $app.innerHTML = html;
   for (const [id, v] of Object.entries(keep)) { const el = document.getElementById(id); if (el) el.value = v; }
   if (focused) { const el = document.getElementById(focused); if (el && el.tagName === 'INPUT' && el.type !== 'range') el.focus({preventScroll: true}); }
@@ -940,7 +957,8 @@ function viewToday() {
     ${logged}
     ${logBtn}
     ${plan}
-    ${isToday && S.program ? `<p class="small muted">${esc(S.program.name)} · double progression: work up to the top of the rep range on every set, then add weight.</p>` : ''}`;
+    ${isToday && S.program ? `<p class="small muted">${esc(S.program.name)} · double progression: work up to the top of the rep range on every set, then add weight.</p>` : ''}
+    <button class="btn ghost" data-act="feedback-open" style="align-self:center">Send feedback</button>`;
 }
 
 /* ---------- logging activities and custom workouts ---------- */
@@ -1162,6 +1180,8 @@ function viewSheet() {
     body = viewScanSheet();
   } else if (S.sheet.type === 'detail' && S.sheet.edit) {
     body = viewEditWorkout();
+  } else if (S.sheet.type === 'feedback') {
+    body = viewFeedbackSheet();
   } else if (S.sheet.type === 'pick') {
     body = viewPickSheet();
   } else if (S.sheet.type === 'program-choose') {
@@ -1351,14 +1371,16 @@ function addToDay(ri, x) {
   r.exercises.push({id: x.id, name: x.name, sets: x.sets || 3, repMin: x.repMin || 8, repMax: x.repMax || 12, kind: x.kind, muscle: x.muscle, rest: x.rest || 90, timed: !!x.timed, ...(x.muscles ? {muscles: x.muscles} : {})});
   store.saveProgram(); S.sheet = null; render(); toast(`${x.name} added`);
 }
-function setProgram(p, msg) {
+function setProgram(p, msg, tab = 'today') {
+  if (S.screen === 'welcome') { S.profile.onboarded = true; store.saveProfile(); S.screen = 'tabs'; S.welcomeStep = 0; }
   S.program = p; S.editRoutine = p.routines[0] && !p.routines[0].exercises.length ? p.routines[0].id : null;
-  store.saveProgram(); S.sheet = null; S.tab = 'program'; render(); window.scrollTo(0, 0); toast(msg);
+  store.saveProgram(); S.sheet = null; S.tab = tab; render(); window.scrollTo(0, 0); toast(msg);
 }
 
 function viewProgram() {
   const u = unit();
   return `${brand('Program')}${storageBanner()}
+    <section class="card row between" style="flex-direction:row;align-items:center"><div class="stack" style="gap:2px"><h3>Help shape Liftbook</h3><span class="small muted">Found a bug or have an idea?</span></div><button class="btn primary" data-act="feedback-open">Send feedback</button></section>
     ${S.program ? viewProgramBuilder() : programSetupCard()}
     <section class="card"><h3>Settings</h3>
       <div class="row between"><span>Units</span><div class="seg"><button data-act="unit" data-v="lb" aria-pressed="${u === 'lb'}">lb</button><button data-act="unit" data-v="kg" aria-pressed="${u === 'kg'}">kg</button></div></div>
@@ -2311,6 +2333,100 @@ async function shareGo() {
   toast('Image saved');
 }
 
+/* ---------- feedback and crash reports ----------
+   Both go through a small outbox in browser storage, so nothing is lost offline; it empties into
+   Supabase (insert-only tables, see supabase/003_feedback_and_errors.sql) whenever it can. */
+const OUTBOX_KEY = 'liftbook.outbox';
+const Outbox = {
+  read() { try { return JSON.parse(localStorage.getItem(OUTBOX_KEY)) || []; } catch { return []; } },
+  write(items) { try { localStorage.setItem(OUTBOX_KEY, JSON.stringify(items.slice(-50))); } catch {} },
+  add(table, row) { const items = this.read(); items.push({table, row}); this.write(items); return this.flush(); },
+  busy: false,
+  async flush() {
+    if (this.busy || !Sync.client || !navigator.onLine) return false;
+    this.busy = true; let sentAll = true;
+    try {
+      for (const item of this.read()) {
+        const row = {...item.row}; if (Sync.user) row.user_id = Sync.user.id; else delete row.user_id;
+        const {error} = await Sync.client.from(item.table).insert(row);
+        if (error) { sentAll = false; if (!tableMissing(error)) console.warn('outbox', error); break; }
+        this.write(this.read().filter(x => x !== item && JSON.stringify(x) !== JSON.stringify(item)));
+      }
+    } catch (e) { sentAll = false; } finally { this.busy = false; }
+    return sentAll;
+  }
+};
+const currentScreen = () => S.screen === 'workout' ? 'workout' : S.screen === 'welcome' ? 'welcome' : (S.sheet ? `${S.tab}/${S.sheet.type}` : S.tab);
+const device = () => navigator.userAgent.slice(0, 300);
+const seenErrors = new Set();
+function reportError(message, stack) {
+  const msg = String(message || 'Unknown error');
+  if (msg === 'Script error.' || seenErrors.size >= 10) return;   // cross-origin noise; cap per session
+  const key = msg + '|' + String(stack || '').slice(0, 200);
+  if (seenErrors.has(key)) return; seenErrors.add(key);
+  Outbox.add('client_errors', {message: msg.slice(0, 1000), stack: String(stack || '').slice(0, 4000), screen: currentScreen(), app_version: APP_VERSION, device: device()});
+}
+window.addEventListener('error', e => reportError(e.message, e.error && e.error.stack));
+window.addEventListener('unhandledrejection', e => { const r = e.reason || {}; reportError('Unhandled: ' + (r.message || r), r.stack); });
+window.addEventListener('online', () => Outbox.flush());
+
+const FEEDBACK_KINDS = [['bug', 'Something’s broken'], ['idea', 'Idea'], ['confusing', 'Confusing'], ['other', 'Other']];
+function viewFeedbackSheet() {
+  const f = S.sheet;
+  return `<div class="row between"><h2>Send feedback</h2><button class="iconbtn" data-act="sheet-close" aria-label="Close">✕</button></div>
+    <p class="small muted" style="margin:0">It goes straight to the person building Liftbook. Be specific: what you tapped, what happened, and what you expected.</p>
+    <div class="chips" role="group" aria-label="Type">${FEEDBACK_KINDS.map(([k, l]) => `<button class="chipbtn" data-act="fb-kind" data-v="${k}" aria-pressed="${f.kind === k}">${l}</button>`).join('')}</div>
+    <label class="field">Message<textarea id="fb-msg" data-in="fb-msg" rows="6" maxlength="4000" placeholder="${f.kind === 'bug' ? 'I tapped Finish and the workout disappeared…' : f.kind === 'idea' ? 'It would help if…' : 'Tell us anything'}">${esc(f.msg || '')}</textarea></label>
+    ${f.err ? `<p class="small" style="margin:0;color:var(--pr)">${esc(f.err)}</p>` : ''}
+    <button class="btn primary lg block" data-act="fb-send">Send</button>
+    <p class="small muted" style="margin:0">${Sync.user ? `Sent as ${esc(Sync.user.email || 'you')}, so you can get a reply.` : 'You’re signed out, so this is sent anonymously.'} Version ${APP_VERSION}.</p>`;
+}
+async function sendFeedback() {
+  const f = S.sheet, msg = (f.msg || '').trim();
+  if (!msg) { f.err = 'Write a few words first.'; render(); return; }
+  const row = {kind: f.kind, message: msg.slice(0, 4000), email: Sync.user ? Sync.user.email : null, screen: f.from, app_version: APP_VERSION, device: device()};
+  S.sheet = null; render();
+  const sent = await Outbox.add('feedback', row);
+  toast(sent ? 'Thanks. Feedback sent.' : 'Saved. It’ll send when you’re back online.');
+}
+
+/* ---------- first-run welcome: units, account, program ---------- */
+const needsWelcome = () => !S.profile.onboarded && !S.program && !S.workouts.length && !S.body.length;
+function viewWelcome() {
+  let step = S.welcomeStep || 0;
+  if (step === 1 && Sync.user) step = S.welcomeStep = 2;   // signed in: move on
+  if (step === 1 && !Sync.client) step = S.welcomeStep = 2; // no cloud sync available
+  const dots = [0, 1, 2].map(i => `<i class="${i === step ? 'on' : ''}"></i>`).join('');
+  let body = '';
+  if (step === 0) {
+    const u = unit();
+    body = `<h1 class="wl-title">Welcome to Lift<span>book</span></h1>
+      <p class="muted">Log your training, see what you hit on a 3D muscle map, and track your weight and body scans. Three quick questions to set up.</p>
+      <section class="card"><h3>Which units do you lift in?</h3>
+        <div class="seg" role="group" aria-label="Units"><button data-act="unit" data-v="lb" aria-pressed="${u === 'lb'}">Pounds (lb)</button><button data-act="unit" data-v="kg" aria-pressed="${u === 'kg'}">Kilograms (kg)</button></div>
+        <p class="small muted" style="margin:0">You can change this later in the Program tab.</p></section>
+      <button class="btn primary lg block" data-act="wl-next">Continue</button>`;
+  } else if (step === 1) {
+    body = `<h2>Save your log to an account</h2>
+      <p class="muted" style="margin:0">With an account, everything backs up automatically and works on any phone or computer you sign in on.</p>
+      ${viewAccount()}
+      <button class="btn block" data-act="wl-next">Skip for now (save on this phone only)</button>`;
+  } else {
+    body = S.program
+      ? `<h2>You’re all set</h2><p class="muted">${Sync.user ? 'Your program and history are synced from your account.' : 'Your program is ready.'}</p>
+         <button class="btn primary lg block" data-act="wl-done">Go to Today</button>`
+      : `<h2>How do you want to train?</h2>
+         <p class="muted" style="margin:0">Pick a starting point. You can change it any time.</p>
+         ${programChoices(false)}
+         <button class="btn block" data-act="wl-done">Decide later</button>`;
+  }
+  return `<div class="wrap welcome"><div class="wl-dots" aria-label="Step ${step + 1} of 3">${dots}</div>${body}</div>`;
+}
+function finishWelcome() {
+  S.profile.onboarded = true; store.saveProfile();
+  S.screen = 'tabs'; S.tab = 'today'; S.welcomeStep = 0; render(); window.scrollTo(0, 0);
+}
+
 /* ---------- events ---------- */
 let armT;
 function arm(key) { if (S.armed === key) return true; S.armed = key; clearTimeout(armT); armT = setTimeout(() => { S.armed = null; render(); }, 3500); render(); return false; }
@@ -2369,6 +2485,11 @@ const A = {
   },
   'dismiss-summary': () => { S.summary = null; render(); },
   'sync-now': () => Sync.run(true),
+  'feedback-open': () => { S.sheet = {type: 'feedback', kind: 'bug', msg: '', from: currentScreen()}; render(); },
+  'fb-kind': d => { S.sheet.kind = d.v; render(); },
+  'fb-send': () => sendFeedback(),
+  'wl-next': () => { S.welcomeStep = (S.welcomeStep || 0) + 1; render(); window.scrollTo(0, 0); },
+  'wl-done': () => finishWelcome(),
   'share-open': d => { S.sheet = {type: 'share', id: d.v}; render(); prepareShare(); },
   'share-theme': d => { if ((S.profile.shareTheme || 'dark') === d.v) return; S.profile.shareTheme = d.v; store.saveProfile(); const sh = S.sheet; if (sh.url) URL.revokeObjectURL(sh.url); sh.url = null; sh.blob = null; render(); prepareShare(); },
   'share-go': () => shareGo(),
@@ -2399,7 +2520,7 @@ const A = {
     addToDay(S.sheet.r, {id: slug(name), name, muscle: document.getElementById('pick-muscle').value, kind: document.getElementById('pick-kind').value,
       timed: document.getElementById('pick-timed').checked, repMin: document.getElementById('pick-timed').checked ? 30 : 8, repMax: document.getElementById('pick-timed').checked ? 60 : 12});
   },
-  'prog-new': () => setProgram(EMPTY_PROGRAM(), 'Program created. Add exercises to Day 1.'),
+  'prog-new': () => setProgram(EMPTY_PROGRAM(), 'Program created. Add exercises to Day 1.', 'program'),
   'prog-template': () => setProgram(JSON.parse(JSON.stringify(TEMPLATE)), 'Jeff Nippard 4-Day Upper/Lower loaded'),
   'prog-replace': () => { S.sheet = {type: 'program-choose'}; render(); },
   'day-add': () => { const d = newDay(S.program.routines.length + 1); S.program.routines.push(d); S.editRoutine = d.id; store.saveProgram(); render(); },
@@ -2473,6 +2594,7 @@ document.addEventListener('input', ev => {
     const v = t === '' ? null : parseFloat(t); s[k === 'ed-w' ? 'w' : 'r'] = v == null || isNaN(v) ? null : (k === 'ed-r' ? Math.round(v) : v);
   } else if (k === 'ed-date') { S.sheet.edit.dateStr = el.value;
   } else if (k === 'ed-name') { S.sheet.edit.routineName = el.value;
+  } else if (k === 'fb-msg') { S.sheet.msg = el.value;
   } else if (k === 'prog-name') { S.program.name = el.value.trim() || 'My program'; saveProgramSoon();
   } else if (k === 'day-name') {
     const i = +el.dataset.r, r = S.program.routines[i]; r.name = el.value.trim() || `Day ${i + 1}`;
@@ -2554,10 +2676,12 @@ async function importFile(file) {
   S.active = d.active || null;
   // defaults keep a zero timestamp so they never overwrite a program already saved in the cloud
   if (!d.program || !d.profile) store.persistLocal();
+  if (needsWelcome()) S.screen = 'welcome';
   S.ready = true; render();
   // ask the browser not to evict the log when storage runs low
   try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch {}
   await Sync.init(); render();
+  Outbox.flush();
 })();
 })();
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
