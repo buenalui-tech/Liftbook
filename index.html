@@ -2189,9 +2189,28 @@ function figureBlock(w) {
 
 /* ---------- share image: front + back views and the full log, 1080×1920 for Stories ---------- */
 const SHARE_THEME = {
-  dark: {bg: '#10151C', ink: '#E8ECF1', muted: '#95A0AD', line: '#2A313A', accent: '#6A93FF', pr: '#FF6275', panel: '#171D26'},
-  light: {bg: '#F4F6F8', ink: '#121820', muted: '#5A6573', line: '#D3D9E0', accent: '#1B4FD6', pr: '#C81F34', panel: '#FFFFFF'}
+  dark: {bg: '#10151C', ink: '#E8ECF1', muted: '#95A0AD', line: '#2A313A', accent: '#6A93FF', pr: '#FF6275', good: '#45C47E', panel: '#171D26'},
+  light: {bg: '#F4F6F8', ink: '#121820', muted: '#5A6573', line: '#D3D9E0', accent: '#1B4FD6', pr: '#C81F34', good: '#1B7D44', panel: '#FFFFFF'}
 };
+// Did each exercise beat the previous session of it? Weighted: estimated max; bodyweight: reps; timed: seconds.
+function sessionScore(e, sets, unitFrom) {
+  if (e.timed) return Math.max(0, ...sets.map(s => s.r || 0));
+  const weighted = sets.filter(s => s.w > 0);
+  if (!weighted.length) return Math.max(0, ...sets.map(s => s.r || 0));
+  return Math.max(...weighted.map(s => e1rm(conv(s.w, unitFrom), s.r)));
+}
+function improvements(w) {
+  const improved = new Set(); let compared = 0;
+  for (const e of w.exercises) {
+    const now = working(e); if (!now.length) continue;
+    const prev = lastPerf(e.exId, w.startedAt, w.id); if (!prev) continue;
+    compared++;
+    // weighted lifts need a real gain (0.5%) so rounding doesn't count as progress
+    const a = sessionScore(e, now, w.unit), b = sessionScore(e, prev.sets, prev.w.unit);
+    if (a > b * (now.some(s => s.w > 0) ? 1.005 : 1)) improved.add(e.exId);
+  }
+  return {improved, compared};
+}
 function bestSet(e, unitFrom) {
   const ws = working(e); if (!ws.length) return null;
   if (e.timed) return {text: `${Math.max(...ws.map(s => s.r || 0))} s`};
@@ -2219,11 +2238,13 @@ async function makeShareImage(w, theme) {
   if (rt && rt.focus) text(rt.focus, L, 290, `600 34px ${B}`, P.accent);
   // stats
   const {v, sets} = volume(w), prs = (w.prs || []).length;
-  const stats = [['TIME', fmtDur(((w.endedAt || w.startedAt) - w.startedAt) / 1000)], ['SETS', String(sets)], ['VOLUME', `${fmtNum(v)} ${unit()}`], ['PRS', String(prs)]];
+  const imp = improvements(w), exCount = w.exercises.filter(e => working(e).length).length;
+  const stats = [['TIME', fmtDur(((w.endedAt || w.startedAt) - w.startedAt) / 1000)], ['SETS', String(sets)],
+    imp.compared ? ['IMPROVED', `${imp.improved.size} of ${imp.compared}`] : ['EXERCISES', String(exCount)], ['PRS', String(prs)]];
   stats.forEach(([k, val], i) => {
     const sx = L + i * ((R - L) / 4);
     text(k, sx, 368, `600 24px ${B}`, P.muted);
-    text(val, sx, 428, `700 58px ${D}`, k === 'PRS' && prs ? P.pr : P.ink);
+    text(val, sx, 428, `700 58px ${D}`, k === 'PRS' && prs ? P.pr : k === 'IMPROVED' && imp.improved.size ? P.good : P.ink);
   });
   // figures
   const fy = 470, fw = 440, fh = 727;
@@ -2238,9 +2259,9 @@ async function makeShareImage(w, theme) {
   const rows = w.exercises.filter(e => working(e).length), room = Math.floor((1790 - y) / 58);
   const shown = rows.length > room ? rows.slice(0, room - 1) : rows;
   for (const e of shown) {
-    const b = bestSet(e, w.unit), pr = (w.prs || []).includes(e.exId);
+    const b = bestSet(e, w.unit), pr = (w.prs || []).includes(e.exId), up = !pr && imp.improved.has(e.exId);
     text(fit(e.name.replace(/ \((Barbell|Dumbbell|Machine|Cable)\)$/, ''), `500 34px ${B}`, 600), L, y, `500 34px ${B}`, P.ink);
-    text((b ? b.text : '') + (pr ? '  ★' : ''), R, y, `700 38px ${D}`, pr ? P.pr : P.ink, 'right');
+    text((b ? b.text : '') + (pr ? '  ★' : up ? '  ▲' : ''), R, y, `700 38px ${D}`, pr ? P.pr : up ? P.good : P.ink, 'right');
     y += 58;
   }
   if (shown.length < rows.length) text(`+ ${rows.length - shown.length} more`, L, y, `500 30px ${B}`, P.muted);
@@ -2248,7 +2269,9 @@ async function makeShareImage(w, theme) {
   text('LIFT', L, 1856, `700 44px ${D}`, P.ink);
   x.font = `700 44px ${D}`; const lw = x.measureText('LIFT').width;
   text('BOOK', L + lw, 1856, `700 44px ${D}`, P.accent);
-  text(prs ? '★ new record · best set shown' : 'best set shown', R, 1852, `500 26px ${B}`, P.muted, 'right');
+  // explain only the marks that actually appear (a record shows ★ instead of ▲)
+  const anyUp = shown.some(e => imp.improved.has(e.exId) && !(w.prs || []).includes(e.exId));
+  text([prs ? '★ record' : '', anyUp ? '▲ beat last time' : '', 'best set shown'].filter(Boolean).join(' · '), R, 1852, `500 26px ${B}`, P.muted, 'right');
   return new Promise(res => C.toBlob(res, 'image/png'));
 }
 function shareFileName(w) { return `liftbook-${slug(w.routineName)}-${localISO(w.startedAt)}.png`; }
