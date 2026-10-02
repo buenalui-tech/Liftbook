@@ -86,14 +86,16 @@ const A = {
   'barcode-close': () => { Scanner.stop(); S.sheet = {type: 'add-food', meal: S.sheet.meal, mode: 'search'}; render(); },
   'barcode-type': () => onBarcode((document.getElementById('scan-code') || {}).value || ''),
   'targets-open': () => { S.sheet = {type: 'targets'}; render(); },
-  'targets-mode': d => { S.profile.nutrition = d.v === 'auto' ? {mode: 'auto'} : {...(targets() || {kcal: 2200, p: 150, c: 220, f: 70}), mode: 'custom'}; delete S.profile.nutrition.basis; store.saveProfile(); render(); },
+  'tg-kmode': d => { const dr = S.sheet.draft; dr.kcalMode = d.v; if (d.v === 'manual' && !dr.kcal) { const a = autoCalories(); dr.kcal = a ? a.kcal : 2200; } render(); },
+  'tg-split': d => { const dr = S.sheet.draft; if (d.v === 'grams' && !dr.grams) { const t = computeTargets(dr); dr.grams = t ? {p: t.p, c: t.c, f: t.f} : {p: 150, c: 220, f: 70}; } dr.split = d.v; render(); },
+  'tg-preset': d => { S.sheet.draft.pct = {p: +d.p, f: +d.f}; render(); },
   'targets-save': () => saveTargets(),
   'checkin-accept': () => {
     const est = estimateBurn(); if (!est.ready) return;
     const now = Date.now(), hist = ((S.profile.adaptive && S.profile.adaptive.history) || []).slice(-25);
     hist.push({at: now, burn: est.burn, intake: est.intake, kgPerWeek: est.kgPerWeek});
     S.profile.adaptive = {burn: est.burn, at: now, week: startOfWeek(now), history: hist};
-    S.profile.nutrition = {mode: 'auto'}; store.saveProfile(); render(); toast(`Targets updated: ${fmtNum(targets().kcal)} kcal`);
+    S.profile.nutrition = {...nutritionPrefs(), kcalMode: 'auto'}; store.saveProfile(); render(); toast(`Targets updated: ${fmtNum(targets().kcal)} kcal`);
   },
   'checkin-skip': () => { S.profile.checkinSkipped = startOfWeek(Date.now()); store.saveProfile(); render(); },
   'day-incomplete': d => {
@@ -224,6 +226,12 @@ document.addEventListener('input', ev => {
   } else if (k === 'ed-date') { S.sheet.edit.dateStr = el.value;
   } else if (k === 'ed-name') { S.sheet.edit.routineName = el.value;
   } else if (k === 'fb-msg') { S.sheet.msg = el.value;
+  } else if (k === 'tg-kcal' || k === 'tg-pct' || k === 'tg-gram') {
+    const dr = S.sheet.draft, n = parseInt(el.value, 10);
+    if (k === 'tg-kcal') dr.kcal = n > 0 ? n : null;
+    else if (k === 'tg-pct') { dr.pct = {...dr.pct, [el.dataset.k]: n >= 0 ? Math.min(n, 95) : 0}; const c = document.getElementById('tg-pc'); if (c) c.value = Math.max(0, 100 - dr.pct.p - dr.pct.f); }
+    else dr.grams = {...(dr.grams || {}), [el.dataset.k]: n >= 0 ? n : 0};
+    const pv = document.getElementById('tg-preview'); if (pv) pv.innerHTML = targetPreview(dr);
   } else if (k === 'ex-note') { S.active.exercises[+el.dataset.e].note = el.value; saveActiveSoon();
   } else if (k === 'wk-note') { S.active.note = el.value; saveActiveSoon();
   } else if (k === 'ed-note') { S.sheet.edit.exercises[+el.dataset.e].note = el.value;

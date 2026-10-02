@@ -38,7 +38,7 @@ function viewTabs() {
   const t = (id, label, icon) => `<button data-act="tab" data-v="${id}" ${S.tab === id ? 'aria-current="page"' : ''}>${ICON[icon]}<span>${label}</span></button>`;
   return `<div class="tabs"><nav>${t('today','Today','today')}${t('food','Food','food')}${t('progress','Progress','prog')}${t('body','Body','body')}${t('program','Program','plan')}</nav></div>`;
 }
-function brand(sub) { return `<div class="brand"><h1>Lift<span>book</span></h1><div class="row" style="gap:6px">${syncPill()}<small>${sub || ''}</small><button class="iconbtn gear" data-act="settings-open" aria-label="Settings">${ICON_GEAR}</button></div></div>`; }
+function brand(sub) { return `<div class="brand"><h1>Lift<span>book</span></h1><div class="row" style="gap:6px">${syncPill()}<button class="iconbtn gear" data-act="settings-open" aria-label="Settings">${ICON_GEAR}</button></div></div>`; }
 const IN_CLAUDE = !!(window.claude && typeof window.claude.use === 'function');
 function storageBanner() {
   if (Sync.user) return '';

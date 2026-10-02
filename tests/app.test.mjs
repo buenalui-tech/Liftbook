@@ -27,7 +27,7 @@ function loadApp(stored = {}) {
   vm.createContext(ctx);
   // top-level const/let live in the context's script scope; expose the names tests need
   const src = FILES.map(f => fs.readFileSync(new URL(`../js/${f}.js`, import.meta.url), 'utf8')).join('\n;\n') +
-    '\n;globalThis.T = {S, store, suggest, e1rm, niceTicks, weightSeries, weeklyRateKg, caloriesFor, improvements, recomputePRs, muscleLoad, musclesFor, tagFor, lastPerf, scanKg, conv, TEMPLATE, CATALOG, slug, startOfDay, fromUsda, fromOff, rankFoods, unitsFor, portionTotals, autoTargets, dayTotals, estimateBurn, targets, targetsFromBurn, copyMeal, foodLogs, viewToday, viewFood, viewProgress, viewBody, viewProgram, viewSheet, viewWorkout, startWorkout, viewSettings, TEMPLATE_COPY: () => JSON.parse(JSON.stringify(TEMPLATE))};';
+    '\n;globalThis.T = {S, store, suggest, e1rm, niceTicks, weightSeries, weeklyRateKg, caloriesFor, improvements, recomputePRs, muscleLoad, musclesFor, tagFor, lastPerf, scanKg, conv, TEMPLATE, CATALOG, slug, startOfDay, fromUsda, fromOff, rankFoods, unitsFor, portionTotals, autoTargets, dayTotals, estimateBurn, targets, targetsFromBurn, computeTargets, nutritionPrefs, copyMeal, foodLogs, viewToday, viewFood, viewProgress, viewBody, viewProgram, viewSheet, viewWorkout, startWorkout, viewSettings, TEMPLATE_COPY: () => JSON.parse(JSON.stringify(TEMPLATE))};';
   vm.runInContext(src, ctx, {filename: 'liftbook.js'});
   return ctx.T;
 }
@@ -240,8 +240,8 @@ test('adaptive: an accepted burn drives targets, adjusted for the goal', () => {
   T.S.profile.goal = {type: 'cut', rate: 0.5};
   T.S.profile.adaptive = {burn: 2750, at: Date.now(), week: 0};
   assert.equal(T.targets().kcal, 2500, '2,750 burn − 250 for a 0.5 lb/week cut');
-  T.S.profile.nutrition = {mode: 'custom', kcal: 2000, p: 160, c: 200, f: 60};
-  assert.equal(T.targets().kcal, 2000, 'custom numbers always win');
+  T.S.profile.nutrition = {kcalMode: 'manual', kcal: 2000, split: 'recommended'};
+  assert.equal(T.targets().kcal, 2000, 'your own calorie number wins over the learned burn');
 });
 
 test('food: copying yesterday’s meal makes new entries for today', () => {
@@ -274,7 +274,7 @@ test('every tab and the main sheets draw without errors, empty and with data', (
   draw('after accepting a learned burn');
   // sheets reached from those tabs
   for (const sheet of [{type: 'add-food', meal: 'lunch', mode: 'search'}, {type: 'add-food', meal: 'lunch', mode: 'recent'}, {type: 'add-food', meal: 'lunch', mode: 'mine'},
-    {type: 'add-food', meal: 'lunch', mode: 'quick'}, {type: 'custom-food', meal: 'lunch'}, {type: 'barcode', meal: 'lunch'}, {type: 'targets'}, {type: 'save-meal', meal: 'lunch'},
+    {type: 'add-food', meal: 'lunch', mode: 'quick'}, {type: 'custom-food', meal: 'lunch'}, {type: 'barcode', meal: 'lunch'}, {type: 'targets'}, {type: 'targets', draft: {kcalMode: 'manual', kcal: 2400, split: 'percent', pct: {p: 40, f: 30}}}, {type: 'targets', draft: {kcalMode: 'auto', split: 'grams', grams: {p: 180, c: 250, f: 70}, pct: {p: 30, f: 30}}}, {type: 'save-meal', meal: 'lunch'},
     {type: 'detail', id: 'a'}, {type: 'log', day: T.startOfDay(Date.now())}, {type: 'scan'}, {type: 'feedback', kind: 'bug'}]) {
     T.S.sheet = sheet;
     assert.doesNotThrow(() => T.viewSheet(), `sheet ${sheet.type}${sheet.mode ? '/' + sheet.mode : ''}`);
@@ -283,4 +283,23 @@ test('every tab and the main sheets draw without errors, empty and with data', (
   // and the live workout screen
   T.startWorkout('upper-a');
   assert.doesNotThrow(() => T.viewWorkout(), 'live workout');
+});
+
+test('targets: percentages always total 100, grams set the calories, legacy custom targets still load', () => {
+  const T = loadApp();
+  T.S.body = [{id: 'w', kind: 'weight', date: Date.now() - DAY, w: 200, unit: 'lb'}];
+  // 50% protein, 25% fat: carbs take the remaining 25%
+  const pct = T.computeTargets({kcalMode: 'manual', kcal: 2000, split: 'percent', pct: {p: 50, f: 25}});
+  assert.deepEqual({...pct.pct}, {p: 50, c: 25, f: 25});
+  assert.equal(pct.p, 250); assert.equal(pct.c, 125); assert.equal(pct.f, 56);
+  // grams: calories are the result, so they can never disagree with the macros
+  const g = T.computeTargets({kcalMode: 'manual', kcal: 1500, split: 'grams', grams: {p: 200, c: 250, f: 70}});
+  assert.equal(g.kcal, 200 * 4 + 250 * 4 + 70 * 9);
+  // recommended: protein and fat from body weight, carbs fill the rest
+  const r = T.computeTargets({kcalMode: 'manual', kcal: 2500, split: 'recommended'});
+  assert.equal(r.p, 180); assert.equal(r.f, 70); assert.equal(r.c, Math.round((2500 - 180 * 4 - 70 * 9) / 4));
+  // the first version's saved shape keeps working
+  T.S.profile.nutrition = {mode: 'custom', kcal: 2000, p: 160, c: 200, f: 60};
+  assert.equal(T.nutritionPrefs().split, 'grams');
+  assert.equal(T.targets().kcal, 160 * 4 + 200 * 4 + 60 * 9);
 });

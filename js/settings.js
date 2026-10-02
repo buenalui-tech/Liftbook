@@ -85,6 +85,10 @@ function viewSettings() {
       <p class="small muted" style="margin:0">${isIOS() ? 'On iPhone, sounds follow your phone’s volume and are muted when the ringer switch is on silent. They also can’t play while the screen is locked; that needs the App Store version.' : 'Volume is relative to your phone’s media volume. Sounds can’t play while the screen is off.'}</p>
     </section>
 
+    <section class="card"><h3>Nutrition</h3>
+      <div class="set-row"><span class="stack" style="gap:1px"><span>Calorie and macro targets</span><span class="small muted">${(() => { const t = targets(); return t ? `${fmtNum(t.kcal)} kcal · ${t.p} g protein` : 'Not set yet'; })()}</span></span><button class="btn" data-act="targets-open">Edit</button></div>
+    </section>
+
     <section class="card"><h3>Training</h3>
       <div class="set-row"><span>Units</span><div class="seg"><button data-act="unit" data-v="lb" aria-pressed="${u === 'lb'}">lb</button><button data-act="unit" data-v="kg" aria-pressed="${u === 'kg'}">kg</button></div></div>
       <div class="set-row"><label for="set-bar">Barbell weight (${u})</label><input id="set-bar" class="mini" data-in="bar" inputmode="decimal" value="${fmtW(S.profile.bar)}"></div>

@@ -125,13 +125,40 @@ function autoTargets() {
   return {kcal, p, f, c: Math.max(0, Math.round((kcal - p * 4 - f * 9) / 4)), fiber: 30,
     basis: `${bmr ? `your InBody BMR (${fmtNum(bmr)} kcal) × 1.5` : `${Math.round(lb)} lb × 15`}${g.type !== 'maintain' ? `, ${g.type === 'cut' ? '−' : '+'}${Math.round(500 * rateLb)} kcal for your ${g.type}` : ''}`};
 }
-function targets() {
-  const n = S.profile.nutrition;
-  if (n && n.mode === 'custom') return {...n, basis: 'your own numbers'};
-  const a = S.profile.adaptive;
-  if (a && a.burn) return targetsFromBurn(a.burn, `your real burn of ${fmtNum(a.burn)} kcal/day, learned from your logs (updated ${fmtDate(a.at)})`) || autoTargets();
-  return autoTargets();
+/* Targets have one source of truth per choice, so the numbers can't contradict each other:
+     calories:  'auto' (learned burn or formula, moved by the goal) | 'manual' (your number)
+     macros:    'recommended' (protein 0.9 g/lb, fat 0.35 g/lb, carbs fill the rest)
+              | 'percent'     (protein % and fat %; carbs take whatever is left, so it always totals 100)
+              | 'grams'       (your grams; calories are calculated from them, so they can't overshoot) */
+const PCT_PRESETS = [['Balanced', 30, 30], ['High protein', 40, 30], ['Lower carb', 40, 40]];   // [name, protein %, fat %]
+function nutritionPrefs() {
+  const n = S.profile.nutrition || {};
+  // the first version saved {mode: 'custom', kcal, p, c, f}: keep honouring it as grams
+  if (n.mode === 'custom' && !n.split) return {kcalMode: 'manual', kcal: n.kcal, split: 'grams', grams: {p: n.p, c: n.c, f: n.f}, pct: {p: 30, f: 30}};
+  return {kcalMode: n.kcalMode || 'auto', kcal: n.kcal || null, split: n.split || 'recommended', pct: n.pct || {p: 30, f: 30}, grams: n.grams || null};
 }
+function bodyLb() { const pts = weightSeries(); return pts.length ? pts[pts.length - 1].trend / KG : null; }
+function autoCalories() {
+  const a = S.profile.adaptive;
+  if (a && a.burn) return {kcal: Math.round((a.burn + goalAdjust().delta) / 10) * 10, basis: `your real burn of ${fmtNum(a.burn)} kcal/day, learned from your logs (updated ${fmtDate(a.at)})`};
+  const t = autoTargets(); return t ? {kcal: t.kcal, basis: t.basis} : null;
+}
+function computeTargets(prefs) {
+  const lb = bodyLb();
+  if (prefs.split === 'grams' && prefs.grams) {
+    const {p = 0, c = 0, f = 0} = prefs.grams;
+    return {kcal: Math.round(p * 4 + c * 4 + f * 9), p, c, f, fiber: 30, lb, split: 'grams', basis: 'your macros (protein × 4 + carbs × 4 + fat × 9)'};
+  }
+  const cal = prefs.kcalMode === 'manual' && prefs.kcal ? {kcal: prefs.kcal, basis: 'your own calorie number'} : autoCalories();
+  if (!cal) return null;
+  const kcal = cal.kcal;
+  const byPct = (pp, pf) => { const pc = Math.max(0, 100 - pp - pf); return {p: Math.round(kcal * pp / 400), c: Math.round(kcal * pc / 400), f: Math.round(kcal * pf / 900), pct: {p: pp, c: pc, f: pf}}; };
+  if (prefs.split === 'percent') return {kcal, ...byPct(prefs.pct.p, prefs.pct.f), fiber: 30, lb, split: 'percent', basis: cal.basis};
+  if (!lb) return {kcal, ...byPct(30, 30), fiber: 30, lb, split: 'recommended', basis: cal.basis, note: 'Log a weigh-in and protein will be set from your body weight.'};
+  const p = Math.round(lb * 0.9), f = Math.round(lb * 0.35), c = Math.round((kcal - p * 4 - f * 9) / 4);
+  return {kcal, p, f, c: Math.max(0, c), fiber: 30, lb, split: 'recommended', basis: cal.basis, note: c < 0 ? 'Calories are too low to fit the recommended protein and fat.' : ''};
+}
+function targets() { return computeTargets(nutritionPrefs()); }
 
 /* ---------- Food tab ---------- */
 function foodDayNav() {
@@ -172,9 +199,9 @@ function viewFood() {
           <span class="chip ${left >= 0 ? 'hold' : 'new'} num">${left >= 0 ? `${fmtNum(left)} left` : `${fmtNum(-left)} over`}</span></div>
           <div class="mac-tr big"><div class="mac-v kc ${left < 0 ? 'over' : ''}" style="width:${Math.min(100, tot.kcal / tg.kcal * 100)}%"></div></div>`
         : `<div><b class="num kcal-big">${fmtNum(tot.kcal)}</b> <span class="muted">kcal</span></div>
-           <p class="small muted" style="margin:0">Log a weigh-in on the Body tab and Liftbook sets calorie and protein targets for you.</p>`}
+           <p class="small muted" style="margin:0">Log a weigh-in on the Body tab and Liftbook sets calorie and protein targets for you, or tap Set targets to enter your own.</p>`}
       ${macroBar('Protein', tot.p, tg && tg.p, 'g', 'p')}${macroBar('Carbs', tot.c, tg && tg.c, 'g', 'c')}${macroBar('Fat', tot.f, tg && tg.f, 'g', 'f')}
-      <div class="row between small muted"><span>Fiber ${Math.round(tot.fiber)} g</span>${tg ? `<button class="btn ghost" data-act="targets-open" style="min-height:0;padding:0">Targets</button>` : ''}</div>
+      <div class="row between small muted"><span>Fiber ${Math.round(tot.fiber)} g</span><button class="btn edit-tg" data-act="targets-open">${tg ? 'Edit targets' : 'Set targets'}</button></div>
       ${learningNote()}
       <label class="row small partial-day"><input type="checkbox" data-act="day-incomplete" ${partial ? 'checked' : ''}> I didn’t log everything ${day === today ? 'today' : 'this day'}
         <span class="muted">(left out when Liftbook learns your burn)</span></label>
@@ -361,21 +388,49 @@ async function onBarcode(code) {
   else { sh.notFound = code; render(); }
 }
 
-/* ---------- targets sheet ---------- */
+/* ---------- targets sheet (edits a draft; nothing changes until Save) ---------- */
+function targetPreview(d) {
+  const t = computeTargets(d); if (!t) return '<p class="small muted" style="margin:0">Log a weigh-in on the Body tab, or choose "My own number", to see your targets.</p>';
+  const pct = k => t.kcal ? Math.round((k === 'f' ? t[k] * 9 : t[k] * 4) / t.kcal * 100) : 0;
+  const gPerLb = t.lb ? t.p / t.lb : null;
+  const warn = gPerLb == null ? '' : gPerLb < 0.7 ? `Protein is ${r1(gPerLb)} g per lb of body weight, below the 0.7–1.0 g most lifters aim for.`
+    : gPerLb > 1.2 ? `Protein is ${r1(gPerLb)} g per lb of body weight, more than the 0.7–1.0 g that helps with muscle. It won’t hurt, but those calories may be better spent on carbs.` : '';
+  return `<div class="tg-sum"><div><b class="num kcal-big">${fmtNum(t.kcal)}</b> <span class="muted">kcal/day</span></div>
+      <div class="tg-macros num">${[['p', 'Protein'], ['c', 'Carbs'], ['f', 'Fat']].map(([k, l]) => `<span><b>${t[k]} g</b><small>${l} · ${pct(k)}%</small></span>`).join('')}</div></div>
+    ${gPerLb ? `<p class="small muted" style="margin:0">That’s ${r1(gPerLb)} g of protein per lb of body weight.</p>` : ''}
+    ${warn ? `<p class="small" style="margin:0;color:var(--warn)">${warn}</p>` : ''}
+    ${t.note ? `<p class="small" style="margin:0;color:var(--warn)">${t.note}</p>` : ''}`;
+}
 function viewTargets() {
-  const a = autoTargets(), n = S.profile.nutrition || {mode: 'auto'}, custom = n.mode === 'custom', cur = custom ? n : (targets() || a);
-  return `<div class="row between"><h2>Daily targets</h2><button class="iconbtn" data-act="sheet-close" aria-label="Close">✕</button></div>
-    <div class="seg" role="group" aria-label="Target mode"><button data-act="targets-mode" data-v="auto" aria-pressed="${!custom}">Set for me</button><button data-act="targets-mode" data-v="custom" aria-pressed="${custom}">My own numbers</button></div>
-    ${!custom ? (a ? `<p class="small muted" style="margin:0">Based on ${esc((targets() || a).basis)}. Protein is 0.9 g per lb of body weight, fat 0.35 g per lb, and carbs fill the rest. Change Cut, Maintain or Bulk on the Body tab. ${S.profile.adaptive ? 'A weekly check-in on the Food tab offers updates as your data changes.' : 'After about 2 weeks of logging food and weight, Liftbook learns your real burn and offers updated targets in a weekly check-in.'}</p>`
-      : '<p class="small muted" style="margin:0">Log a weigh-in on the Body tab first.</p>') : ''}
-    <div class="scan-grid">
-      ${[['kcal', 'Calories', ''], ['p', 'Protein', 'g'], ['c', 'Carbs', 'g'], ['f', 'Fat', 'g']].map(([k, l, u]) => `<label class="field">${l}${u ? ` (${u})` : ''}<input id="tg-${k}" inputmode="numeric" value="${cur ? cur[k] : ''}" ${custom ? '' : 'disabled'}></label>`).join('')}
-    </div>
-    ${custom ? '<button class="btn primary block" data-act="targets-save">Save targets</button>' : ''}`;
+  const d = S.sheet.draft || (S.sheet.draft = JSON.parse(JSON.stringify(nutritionPrefs())));
+  const grams = d.split === 'grams', auto = autoCalories(), cur = computeTargets(d) || {};
+  const seg = (act, opts, val) => `<div class="seg" role="group">${opts.map(([v, l]) => `<button data-act="${act}" data-v="${v}" aria-pressed="${val === v}">${l}</button>`).join('')}</div>`;
+  const kcalBlock = grams ? '<p class="small muted" style="margin:0">With Grams, calories are worked out from your macros.</p>'
+    : `${seg('tg-kmode', [['auto', 'Set for me'], ['manual', 'My own number']], d.kcalMode)}
+       ${d.kcalMode === 'manual' ? `<label class="field">Calories per day<input id="tg-kcal" data-in="tg-kcal" inputmode="numeric" value="${d.kcal ?? (auto ? auto.kcal : '')}"></label>`
+         : `<p class="small muted" style="margin:0">${auto ? `${fmtNum(auto.kcal)} kcal, from ${esc(auto.basis)}. ${S.profile.adaptive ? 'The weekly check-in keeps it up to date.' : 'After about 2 weeks of logging, a weekly check-in replaces this estimate with your real burn.'}` : 'Log a weigh-in on the Body tab so Liftbook can estimate your calories.'}</p>`}`;
+  const macroBlock = d.split === 'recommended'
+    ? '<p class="small muted" style="margin:0">Protein 0.9 g and fat 0.35 g per lb of body weight; carbs fill the rest of your calories. The simplest choice for lifting.</p>'
+    : d.split === 'percent'
+    ? `<div class="chips">${PCT_PRESETS.map(([n, p, f]) => `<button class="chipbtn" data-act="tg-preset" data-p="${p}" data-f="${f}" aria-pressed="${d.pct.p === p && d.pct.f === f}">${n} ${p}/${100 - p - f}/${f}</button>`).join('')}</div>
+       <div class="scan-grid three"><label class="field">Protein %<input id="tg-pp" data-in="tg-pct" data-k="p" inputmode="numeric" value="${d.pct.p}"></label>
+         <label class="field">Fat %<input id="tg-pf" data-in="tg-pct" data-k="f" inputmode="numeric" value="${d.pct.f}"></label>
+         <label class="field">Carbs %<input id="tg-pc" value="${Math.max(0, 100 - d.pct.p - d.pct.f)}" disabled></label></div>
+       <p class="small muted" style="margin:0">Carbs take whatever’s left, so the total is always 100%.</p>`
+    : `<div class="scan-grid three">${[['p', 'Protein'], ['c', 'Carbs'], ['f', 'Fat']].map(([k, l]) => `<label class="field">${l} (g)<input id="tg-g${k}" data-in="tg-gram" data-k="${k}" inputmode="numeric" value="${(d.grams || cur)[k] ?? ''}"></label>`).join('')}</div>`;
+  return `<div class="row between"><h2>Calorie and macro targets</h2><button class="iconbtn" data-act="sheet-close" aria-label="Close">✕</button></div>
+    <div class="stack" style="gap:8px"><p class="eyebrow" style="margin:0">Calories</p>${kcalBlock}</div>
+    <div class="stack" style="gap:8px"><p class="eyebrow" style="margin:0">Macros</p>${seg('tg-split', [['recommended', 'Recommended'], ['percent', 'Percentages'], ['grams', 'Grams']], d.split)}${macroBlock}</div>
+    <div class="card tg-preview" id="tg-preview">${targetPreview(d)}</div>
+    <button class="btn primary lg block" data-act="targets-save">Save targets</button>
+    <p class="small muted" style="margin:0">Cut, Maintain or Bulk is set on the Body tab and moves calories when they’re set for you.</p>`;
 }
 function saveTargets() {
-  const num = id => parseInt(document.getElementById(id).value, 10) || 0;
-  const t = {mode: 'custom', kcal: num('tg-kcal'), p: num('tg-p'), c: num('tg-c'), f: num('tg-f'), fiber: 30};
-  if (t.kcal < 800 || t.kcal > 8000) { toast('Calories should be between 800 and 8,000.'); return; }
-  S.profile.nutrition = t; store.saveProfile(); S.sheet = null; render(); toast('Targets saved');
+  const d = S.sheet.draft, t = computeTargets(d);
+  if (d.split !== 'grams' && d.kcalMode === 'manual' && !(d.kcal >= 800 && d.kcal <= 8000)) { toast('Calories should be between 800 and 8,000.'); return; }
+  if (d.split === 'percent' && d.pct.p + d.pct.f > 95) { toast('Protein and fat can’t add up to more than 95%.'); return; }
+  if (d.split === 'grams' && !(t && t.kcal >= 800 && t.kcal <= 8000)) { toast('Those macros come to ' + fmtNum(t ? t.kcal : 0) + ' kcal. Aim for 800–8,000.'); return; }
+  if (!t) { toast('Log a weigh-in first, or choose “My own number”.'); return; }
+  S.profile.nutrition = {kcalMode: d.kcalMode, kcal: d.kcal, split: d.split, pct: d.pct, grams: d.split === 'grams' ? d.grams : null};
+  store.saveProfile(); S.sheet = null; render(); toast(`Targets saved: ${fmtNum(t.kcal)} kcal`);
 }

@@ -46,7 +46,7 @@ function targetsFromBurn(burn, basis) {
 
 /* ---------- weekly check-in (once per Monday-started week, only when there's a learned value) ---------- */
 function checkinDue() {
-  const n = S.profile.nutrition; if (n && n.mode === 'custom') return null;
+  const pr = nutritionPrefs(); if (pr.kcalMode === 'manual' || pr.split === 'grams') return null;   // the user chose their own calories
   const est = estimateBurn(); if (!est.ready) return null;
   const wk = startOfWeek(Date.now()), a = S.profile.adaptive;
   if (a && a.week === wk) return null;                          // already accepted this week
