@@ -90,13 +90,15 @@ const A = {
   'tg-split': d => { const dr = S.sheet.draft; if (d.v === 'grams' && !dr.grams) { const t = computeTargets(dr); dr.grams = t ? {p: t.p, c: t.c, f: t.f} : {p: 150, c: 220, f: 70}; } dr.split = d.v; render(); },
   'tg-preset': d => { S.sheet.draft.pct = {p: +d.p, f: +d.f}; render(); },
   'targets-save': () => saveTargets(),
-  'checkin-accept': () => {
-    const est = estimateBurn(); if (!est.ready) return;
-    const now = Date.now(), hist = ((S.profile.adaptive && S.profile.adaptive.history) || []).slice(-25);
-    hist.push({at: now, burn: est.burn, intake: est.intake, kgPerWeek: est.kgPerWeek});
-    S.profile.adaptive = {burn: est.burn, at: now, week: startOfWeek(now), history: hist};
-    S.profile.nutrition = {...nutritionPrefs(), kcalMode: 'auto'}; store.saveProfile(); render(); toast(`Targets updated: ${fmtNum(targets().kcal)} kcal`);
+  'checkin-accept': () => { const est = estimateBurn(); if (!est.ready) return; const p = applyCheckin(est, false); render(); if (p) toast(`Targets updated: ${fmtNum(p.next.kcal)} kcal`); },
+  'checkin-undo': () => {
+    const a = S.profile.autoCheckin; if (!a) return;
+    S.profile.nutrition = a.prev.nutrition; S.profile.adaptive = a.prev.adaptive;
+    S.profile.checkinSkipped = a.week; S.profile.autoCheckin = {...a, dismissed: true};
+    store.saveProfile(); render(); toast(`Back to ${fmtNum(a.from)} kcal`);
   },
+  'checkin-note-close': () => { S.profile.autoCheckin = {...S.profile.autoCheckin, dismissed: true}; store.saveProfile(); render(); },
+  'set-checkin': d => { setSetting('checkinMode', d.v); render(); },
   'checkin-skip': () => { S.profile.checkinSkipped = startOfWeek(Date.now()); store.saveProfile(); render(); },
   'day-incomplete': d => {
     const day = S.day || startOfDay(Date.now()), cut = startOfDay(Date.now()) - 120 * DAY;

@@ -1,7 +1,7 @@
 // Liftbook — Settings: appearance, rest timer sound and behaviour, units, account, backups.
 // Classic script: files load in order (see index.html) and share top-level names.
 
-const SETTING_DEFAULTS = {theme: 'system', accent: 'blue', sound: 'beep', volume: 0.7, countdown: true, vibrate: true, keepAwake: true, autoRest: true};
+const SETTING_DEFAULTS = {theme: 'system', accent: 'blue', sound: 'beep', volume: 0.7, countdown: true, vibrate: true, keepAwake: true, autoRest: true, checkinMode: 'ask'};
 const setting = k => { const s = S.profile.settings || {}; return s[k] ?? SETTING_DEFAULTS[k]; };
 function setSetting(k, v) { S.profile.settings = {...(S.profile.settings || {}), [k]: v}; store.saveProfile(); applyAppearance(); }
 
@@ -86,6 +86,8 @@ function viewSettings() {
     </section>
 
     <section class="card"><h3>Nutrition</h3>
+      <div class="set-row"><span class="stack" style="gap:1px"><span>Weekly check-in</span><span class="small muted">Adjusts targets from your real intake and weight trend</span></span>
+        <div class="seg" role="group" aria-label="Weekly check-in">${[['ask', 'Ask me'], ['auto', 'Automatic'], ['off', 'Off']].map(([v, l]) => `<button data-act="set-checkin" data-v="${v}" aria-pressed="${setting('checkinMode') === v}">${l}</button>`).join('')}</div></div>
       <div class="set-row"><span class="stack" style="gap:1px"><span>Calorie and macro targets</span><span class="small muted">${(() => { const t = targets(); return t ? `${fmtNum(t.kcal)} kcal · ${t.p} g protein` : 'Not set yet'; })()}</span></span><button class="btn" data-act="targets-open">Edit</button></div>
     </section>
 

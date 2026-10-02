@@ -27,7 +27,7 @@ function loadApp(stored = {}) {
   vm.createContext(ctx);
   // top-level const/let live in the context's script scope; expose the names tests need
   const src = FILES.map(f => fs.readFileSync(new URL(`../js/${f}.js`, import.meta.url), 'utf8')).join('\n;\n') +
-    '\n;globalThis.T = {S, store, suggest, e1rm, niceTicks, weightSeries, weeklyRateKg, caloriesFor, improvements, recomputePRs, muscleLoad, musclesFor, tagFor, lastPerf, scanKg, conv, TEMPLATE, CATALOG, slug, startOfDay, fromUsda, fromOff, rankFoods, unitsFor, portionTotals, autoTargets, dayTotals, estimateBurn, targets, targetsFromBurn, computeTargets, nutritionPrefs, copyMeal, foodLogs, viewToday, viewFood, viewProgress, viewBody, viewProgram, viewSheet, viewWorkout, startWorkout, viewSettings, TEMPLATE_COPY: () => JSON.parse(JSON.stringify(TEMPLATE))};';
+    '\n;globalThis.T = {S, store, suggest, e1rm, niceTicks, weightSeries, weeklyRateKg, caloriesFor, improvements, recomputePRs, muscleLoad, musclesFor, tagFor, lastPerf, scanKg, conv, TEMPLATE, CATALOG, slug, startOfDay, fromUsda, fromOff, rankFoods, unitsFor, portionTotals, autoTargets, dayTotals, estimateBurn, targets, targetsFromBurn, computeTargets, nutritionPrefs, proposeTargets, applyCheckin, runAutoCheckin, checkinDue, copyMeal, foodLogs, viewToday, viewFood, viewProgress, viewBody, viewProgram, viewSheet, viewWorkout, startWorkout, viewSettings, TEMPLATE_COPY: () => JSON.parse(JSON.stringify(TEMPLATE))};';
   vm.runInContext(src, ctx, {filename: 'liftbook.js'});
   return ctx.T;
 }
@@ -302,4 +302,39 @@ test('targets: percentages always total 100, grams set the calories, legacy cust
   T.S.profile.nutrition = {mode: 'custom', kcal: 2000, p: 160, c: 200, f: 60};
   assert.equal(T.nutritionPrefs().split, 'grams');
   assert.equal(T.targets().kcal, 160 * 4 + 200 * 4 + 60 * 9);
+});
+
+test('check-in: works with your own numbers, moves at most 250 kcal a week, and grams keep protein', () => {
+  const T = loadApp();
+  steadyWorld(T, {kcal: 2500, lbPerWeek: 0.5});           // real burn ≈ 2,750
+  T.S.profile.goal = {type: 'cut', rate: 1};              // wants −500 → about 2,250
+  // my own number, far too high: the suggestion moves 250 toward the goal, not all the way
+  T.S.profile.nutrition = {kcalMode: 'manual', kcal: 3000, split: 'recommended'};
+  const est = T.checkinDue();
+  assert.ok(est, 'check-ins now appear for your own numbers too');
+  const p = T.proposeTargets(est);
+  assert.equal(p.next.kcal, 2750); assert.equal(p.capped, true);
+  T.applyCheckin(est, false);
+  assert.equal(T.nutritionPrefs().kcalMode, 'manual', 'still your own number');
+  assert.equal(T.targets().kcal, 2750);
+  // grams: protein fixed, carbs absorb the change
+  T.S.profile.adaptive = null;
+  T.S.profile.nutrition = {kcalMode: 'manual', split: 'grams', grams: {p: 200, c: 300, f: 70}};   // 2,630 kcal
+  const g = T.proposeTargets(T.checkinDue());
+  assert.equal(g.next.p, 200);
+  assert.ok(g.next.c < 300 && g.next.f === 70, `carbs drop first: ${g.next.c} g carbs, ${g.next.f} g fat`);
+  assert.ok(Math.abs(g.next.kcal - (2630 - 250)) <= 10);
+});
+
+test('check-in: automatic mode applies once a week and can be undone', () => {
+  const T = loadApp();
+  steadyWorld(T, {kcal: 2500, lbPerWeek: 0.5});
+  T.S.profile.goal = {type: 'maintain', rate: 0};
+  T.S.profile.settings = {checkinMode: 'auto'};
+  T.S.profile.nutrition = {kcalMode: 'manual', kcal: 2400, split: 'recommended'};
+  T.runAutoCheckin();
+  assert.equal(T.targets().kcal, 2650, '2,400 moves 250 toward the 2,750 burn');
+  T.runAutoCheckin();
+  assert.equal(T.targets().kcal, 2650, 'only once a week');
+  assert.equal(T.S.profile.autoCheckin.from, 2400);
 });

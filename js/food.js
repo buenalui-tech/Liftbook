@@ -140,7 +140,8 @@ function nutritionPrefs() {
 function bodyLb() { const pts = weightSeries(); return pts.length ? pts[pts.length - 1].trend / KG : null; }
 function autoCalories() {
   const a = S.profile.adaptive;
-  if (a && a.burn) return {kcal: Math.round((a.burn + goalAdjust().delta) / 10) * 10, basis: `your real burn of ${fmtNum(a.burn)} kcal/day, learned from your logs (updated ${fmtDate(a.at)})`};
+  // base = the maintenance the last check-in settled on (it moves at most 250 kcal a week toward the real burn)
+  if (a && a.burn) return {kcal: Math.round(((a.base ?? a.burn) + goalAdjust().delta) / 10) * 10, basis: `your real burn of ${fmtNum(a.burn)} kcal/day, learned from your logs (updated ${fmtDate(a.at)})`};
   const t = autoTargets(); return t ? {kcal: t.kcal, basis: t.basis} : null;
 }
 function computeTargets(prefs) {
@@ -177,7 +178,8 @@ function viewFood() {
   const today = startOfDay(Date.now()); if (!S.day || S.day > today) S.day = today;
   const day = S.day, tot = dayTotals(day), tg = targets();
   const left = tg ? tg.kcal - tot.kcal : null;
-  const due = day === today ? checkinDue() : null, partial = isIncompleteDay(day), yesterday = day - DAY;
+  if (day === today) runAutoCheckin();
+  const due = day === today && setting('checkinMode') === 'ask' ? checkinDue() : null, partial = isIncompleteDay(day), yesterday = day - DAY;
   const meals = MEALS.map(([m, label]) => {
     const items = foodLogs(day).filter(x => x.meal === m).sort((a, b) => a.date - b.date);
     const kcal = items.reduce((s, x) => s + (x.totals.kcal || 0), 0);
@@ -192,6 +194,7 @@ function viewFood() {
       </div></section>`;
   }).join('');
   return `${brand('Food')}${storageBanner()}
+    ${day === today ? autoCheckinBanner() : ''}
     ${due ? viewCheckin(due) : ''}
     ${foodDayNav()}
     <section class="card">

@@ -5,7 +5,7 @@
      real burn (kcal/day) = average intake on fully logged days − trend-weight change × 7,700 kcal/kg ÷ days
    (7,700 kcal/kg is the usual 3,500 kcal per lb). The weight side uses the 7-day trend, not raw
    weigh-ins, so water swings wash out. Nothing changes until the user accepts a weekly check-in. */
-const ADAPT = {windowDays: 21, minFoodDays: 10, minWeighIns: 6, kcalPerKg: 7700, minPlausible: 1200, maxPlausible: 5000, partialDayKcal: 600};
+const ADAPT = {weeklyCap: 250, windowDays: 21, minFoodDays: 10, minWeighIns: 6, kcalPerKg: 7700, minPlausible: 1200, maxPlausible: 5000, partialDayKcal: 600};
 
 const isIncompleteDay = day => (S.profile.incompleteDays || []).includes(day);
 // days in the window that count: something real logged, and not marked as partly logged
@@ -44,30 +44,90 @@ function targetsFromBurn(burn, basis) {
   return {kcal, p, f, c: Math.max(0, Math.round((kcal - p * 4 - f * 9) / 4)), fiber: 30, burn, basis};
 }
 
-/* ---------- weekly check-in (once per Monday-started week, only when there's a learned value) ---------- */
+/* ---------- weekly check-in: works with every target setup ----------
+   The suggestion is always "real burn + goal adjustment", reached at most ADAPT.weeklyCap kcal per week,
+   and applied in the shape the user chose: the automatic number, their own calorie number, or their grams
+   (protein never moves; carbs absorb the change, then fat, each with a floor). */
 function checkinDue() {
-  const pr = nutritionPrefs(); if (pr.kcalMode === 'manual' || pr.split === 'grams') return null;   // the user chose their own calories
+  if (setting('checkinMode') === 'off') return null;
   const est = estimateBurn(); if (!est.ready) return null;
   const wk = startOfWeek(Date.now()), a = S.profile.adaptive;
-  if (a && a.week === wk) return null;                          // already accepted this week
-  if ((S.profile.checkinSkipped || 0) === wk) return null;      // "keep current" this week
+  if (a && a.week === wk) return null;                          // already handled this week
+  if ((S.profile.checkinSkipped || 0) === wk) return null;      // "keep my numbers" this week
   return est;
 }
+function proposeTargets(est) {
+  const prefs = nutritionPrefs(), cur = computeTargets(prefs); if (!cur) return null;
+  const want = est.burn + goalAdjust().delta;
+  const step = Math.max(-ADAPT.weeklyCap, Math.min(ADAPT.weeklyCap, want - cur.kcal));
+  const kcal = Math.round((cur.kcal + step) / 10) * 10;
+  const capped = Math.abs(want - cur.kcal) > ADAPT.weeklyCap;
+  let next;
+  if (prefs.split === 'grams') {
+    const lb = bodyLb() || 180, g = {...prefs.grams};
+    let diff = kcal - cur.kcal;
+    const cFloor = Math.round(lb * 0.5), fFloor = Math.round(lb * 0.3);
+    const c = Math.max(cFloor, Math.round(g.c + diff / 4)); diff -= (c - g.c) * 4;
+    const f = Math.max(fFloor, Math.round(g.f + diff / 9));
+    next = {...prefs, grams: {p: g.p, c, f}};
+  } else if (prefs.kcalMode === 'manual') next = {...prefs, kcal};
+  else next = prefs;   // automatic calories: the new maintenance is stored on the adaptive record
+  return {prefs: next, base: kcal - goalAdjust().delta, cur, next: prefs.kcalMode === 'auto' && prefs.split !== 'grams' ? {...cur, ...computeTargets({...prefs, kcalMode: 'manual', kcal})} : computeTargets(next), capped, want: Math.round(want / 10) * 10};
+}
+function applyCheckin(est, auto) {
+  const p = proposeTargets(est); if (!p) return null;
+  const now = Date.now(), prev = {nutrition: S.profile.nutrition || null, adaptive: S.profile.adaptive || null};
+  const hist = ((S.profile.adaptive && S.profile.adaptive.history) || []).slice(-25);
+  hist.push({at: now, burn: est.burn, intake: est.intake, kgPerWeek: est.kgPerWeek, from: p.cur.kcal, to: p.next.kcal});
+  S.profile.adaptive = {burn: est.burn, base: p.base, at: now, week: startOfWeek(now), history: hist};
+  S.profile.nutrition = p.prefs;
+  if (auto) S.profile.autoCheckin = {week: startOfWeek(now), from: p.cur.kcal, to: p.next.kcal, prev};
+  store.saveProfile();
+  return p;
+}
+// how the trend compares with the goal, in plain words
+function paceText(est) {
+  const g = S.profile.goal || {type: 'maintain', rate: 0}, rateLb = goalAdjust().rateLb, actualLb = est.kgPerWeek / KG;
+  const target = g.type === 'cut' ? -rateLb : g.type === 'bulk' ? rateLb : 0;
+  const d = actualLb - target;
+  if (Math.abs(d) < 0.15) return 'right on pace for your goal';
+  if (g.type === 'cut') return d > 0 ? 'losing slower than planned' : 'losing faster than planned';
+  if (g.type === 'bulk') return d < 0 ? 'gaining slower than planned' : 'gaining faster than planned';
+  return d > 0 ? 'drifting up' : 'drifting down';
+}
 function viewCheckin(est) {
-  const cur = targets(), next = targetsFromBurn(est.burn, '');
-  const u = unit(), change = fromKg(est.kgPerWeek);
-  const first = !S.profile.adaptive;
+  const p = proposeTargets(est); if (!p) return '';
+  const u = unit(), change = fromKg(est.kgPerWeek), prefs = nutritionPrefs(), noChange = Math.abs(p.next.kcal - p.cur.kcal) < 20;
+  const how = prefs.split === 'grams'
+    ? `Protein stays ${p.cur.p} g · carbs ${p.cur.c} → ${p.next.c} g · fat ${p.cur.f} → ${p.next.f} g`
+    : prefs.kcalMode === 'manual' ? 'Updates your own calorie number; your macro split stays the same.' : '';
   return `<section class="card checkin">
-    <div class="stack" style="gap:2px"><p class="eyebrow" style="margin:0">Weekly check-in</p><h3>${first ? 'Liftbook has learned your metabolism' : 'Your targets for this week'}</h3></div>
+    <div class="stack" style="gap:2px"><p class="eyebrow" style="margin:0">Weekly check-in</p><h3>You’re ${paceText(est)}</h3></div>
     <div class="stats">
       <div class="stat"><b class="num">${fmtNum(est.intake)}</b><span>Avg kcal eaten</span></div>
       <div class="stat"><b class="num">${change > 0 ? '+' : change < 0 ? '−' : ''}${f1(Math.abs(change))}</b><span>${u}/week trend</span></div>
       <div class="stat"><b class="num">${fmtNum(est.burn)}</b><span>Real burn/day</span></div></div>
-    <p class="small muted" style="margin:0">From ${est.foodDays} fully logged days and ${est.weighIns} weigh-ins in the last 3 weeks. ${first ? `Your formula estimate was ${fmtNum(autoTargets() ? autoTargets().kcal - goalAdjust().delta : 0)} kcal.` : ''}</p>
-    <div class="row between"><span>New target</span><b class="num">${cur ? `<span class="muted" style="text-decoration:line-through;font-weight:500">${fmtNum(cur.kcal)}</span> → ` : ''}${fmtNum(next.kcal)} kcal</b></div>
-    <div class="row"><button class="btn primary grow" data-act="checkin-accept">Update my targets</button><button class="btn" data-act="checkin-skip">Keep current</button></div>
+    <p class="small muted" style="margin:0">From ${est.foodDays} fully logged days and ${est.weighIns} weigh-ins in the last 3 weeks.</p>
+    ${noChange ? `<p style="margin:0">Your targets already fit. No change needed this week.</p><button class="btn block" data-act="checkin-skip">Got it</button>`
+      : `<div class="row between"><span>Suggested</span><b class="num"><span class="muted" style="text-decoration:line-through;font-weight:500">${fmtNum(p.cur.kcal)}</span> → ${fmtNum(p.next.kcal)} kcal</b></div>
+         ${how ? `<p class="small muted" style="margin:0">${how}</p>` : ''}
+         ${p.capped ? `<p class="small muted" style="margin:0">Your data points to about ${fmtNum(p.want)} kcal. Liftbook moves at most ${ADAPT.weeklyCap} kcal a week, so one unusual week can’t swing your targets; it’ll keep adjusting if the trend holds.</p>` : ''}
+         <div class="row"><button class="btn primary grow" data-act="checkin-accept">Update my targets</button><button class="btn" data-act="checkin-skip">Keep my numbers</button></div>`}
   </section>`;
 }
+// "Update automatically": applied when the Food tab is drawn, with a note and Undo for that week
+function autoCheckinBanner() {
+  const a = S.profile.autoCheckin; if (!a || a.week !== startOfWeek(Date.now()) || a.dismissed) return '';
+  return `<div class="banner row between checkin-note"><span>Targets updated this week: <b>${fmtNum(a.from)} → ${fmtNum(a.to)} kcal</b>, from your weekly check-in.</span>
+    <span class="row" style="gap:4px"><button class="btn" data-act="checkin-undo" style="min-height:34px">Undo</button><button class="iconbtn" data-act="checkin-note-close" aria-label="Dismiss">✕</button></span></div>`;
+}
+function runAutoCheckin() {
+  if (setting('checkinMode') !== 'auto') return;
+  const est = checkinDue(); if (!est) return;
+  const p = proposeTargets(est); if (!p || Math.abs(p.next.kcal - p.cur.kcal) < 20) { S.profile.checkinSkipped = startOfWeek(Date.now()); store.saveProfile(); return; }
+  applyCheckin(est, true);
+}
+
 function learningNote() {
   if (S.profile.adaptive) return '';
   const est = estimateBurn();
