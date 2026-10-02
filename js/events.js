@@ -63,6 +63,23 @@ const A = {
   },
   'dismiss-summary': () => { S.summary = null; render(); },
   'sync-now': () => Sync.run(true),
+  'food-add': d => { S.sheet = {type: 'add-food', meal: d.v, mode: 'search', q: ''}; render(); const i = document.getElementById('food-q'); if (i) i.focus(); },
+  'food-mode': d => { S.sheet.mode = d.v; render(); },
+  'food-pick': d => { const f = S.sheet.results && S.sheet.results[+d.v]; if (f) openPortion(f, S.sheet.meal); },
+  'food-edit': d => { const e = S.food.find(x => x.id === d.v); if (e) { S.sheet = null; openPortion(e.food, e.meal, e); } },
+  'portion-back': () => { S.sheet = S.sheet.back || null; render(); },
+  'po-meal': d => { S.sheet.meal = d.v; render(); },
+  'portion-save': () => savePortion(),
+  'food-del': () => { if (!arm('fdel')) return; disarm(); const id = S.sheet.editId; S.food = S.food.filter(x => x.id !== id); store.deleteFood(id); S.sheet = null; render(); toast('Removed'); },
+  'quick-save': () => saveQuickAdd(),
+  'custom-new': d => { S.sheet = {type: 'custom-food', meal: (S.sheet && S.sheet.meal) || 'snack', barcode: d.v || ''}; render(); },
+  'custom-save': () => saveCustomFood(),
+  'barcode-open': () => { S.sheet = {type: 'barcode', meal: S.sheet.meal}; render(); },
+  'barcode-close': () => { Scanner.stop(); S.sheet = {type: 'add-food', meal: S.sheet.meal, mode: 'search'}; render(); },
+  'barcode-type': () => onBarcode((document.getElementById('scan-code') || {}).value || ''),
+  'targets-open': () => { S.sheet = {type: 'targets'}; render(); },
+  'targets-mode': d => { S.profile.nutrition = d.v === 'auto' ? {mode: 'auto'} : {...(targets() || {kcal: 2200, p: 150, c: 220, f: 70}), mode: 'custom'}; delete S.profile.nutrition.basis; store.saveProfile(); render(); },
+  'targets-save': () => saveTargets(),
   'feedback-open': () => { S.sheet = {type: 'feedback', kind: 'bug', msg: '', from: currentScreen()}; render(); },
   'fb-kind': d => { S.sheet.kind = d.v; render(); },
   'fb-send': () => sendFeedback(),
@@ -176,6 +193,11 @@ document.addEventListener('input', ev => {
   } else if (k === 'ed-date') { S.sheet.edit.dateStr = el.value;
   } else if (k === 'ed-name') { S.sheet.edit.routineName = el.value;
   } else if (k === 'fb-msg') { S.sheet.msg = el.value;
+  } else if (k === 'food-q') { S.sheet.q = el.value; later('food-q', () => runSearch(el.value), 450);
+  } else if (k === 'po-qty' || k === 'po-unit') {
+    if (k === 'po-qty') S.sheet.qty = el.value; else S.sheet.unit = el.value;
+    const {grams, totals} = portionTotals(S.sheet.food, parseFloat(String(S.sheet.qty).replace(',', '.')) || 0, S.sheet.unit);
+    const box = document.getElementById('po-totals'); if (box) box.innerHTML = portionStats(totals, grams);
   } else if (k === 'prog-name') { S.program.name = el.value.trim() || 'My program'; saveProgramSoon();
   } else if (k === 'day-name') {
     const i = +el.dataset.r, r = S.program.routines[i]; r.name = el.value.trim() || `Day ${i + 1}`;
@@ -255,6 +277,7 @@ async function importFile(file) {
   S.program = d.program || null;   // new users choose: build from scratch, a template, or an imported program
   S.workouts = (d.workouts || []).sort((a, b) => b.startedAt - a.startedAt);
   S.body = (d.body || []).sort((a, b) => b.date - a.date);
+  S.food = (d.food || []).sort((a, b) => b.date - a.date);
   S.active = d.active || null;
   // defaults keep a zero timestamp so they never overwrite a program already saved in the cloud
   if (!d.program || !d.profile) store.persistLocal();

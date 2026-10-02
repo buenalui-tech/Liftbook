@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 
-const FILES = ['core', 'training', 'ui', 'program', 'body', 'figure', 'share', 'tester', 'events'];
+const FILES = ['core', 'training', 'ui', 'program', 'body', 'food', 'figure', 'share', 'tester', 'events'];
 const DAY = 86400000;
 
 function loadApp(stored = {}) {
@@ -27,7 +27,7 @@ function loadApp(stored = {}) {
   vm.createContext(ctx);
   // top-level const/let live in the context's script scope; expose the names tests need
   const src = FILES.map(f => fs.readFileSync(new URL(`../js/${f}.js`, import.meta.url), 'utf8')).join('\n;\n') +
-    '\n;globalThis.T = {S, store, suggest, e1rm, niceTicks, weightSeries, weeklyRateKg, caloriesFor, improvements, recomputePRs, muscleLoad, musclesFor, tagFor, lastPerf, scanKg, conv, TEMPLATE, CATALOG, slug, startOfDay};';
+    '\n;globalThis.T = {S, store, suggest, e1rm, niceTicks, weightSeries, weeklyRateKg, caloriesFor, improvements, recomputePRs, muscleLoad, musclesFor, tagFor, lastPerf, scanKg, conv, TEMPLATE, CATALOG, slug, startOfDay, fromUsda, fromOff, rankFoods, unitsFor, portionTotals, autoTargets, dayTotals};';
   vm.runInContext(src, ctx, {filename: 'liftbook.js'});
   return ctx.T;
 }
@@ -147,4 +147,51 @@ test('day badges are short and readable', () => {
   const T = loadApp();
   assert.equal(T.tagFor('Upper A'), 'UA');
   assert.equal(T.tagFor('Push'), 'PU');
+});
+
+test('food: USDA results become per-100 g foods with household portions', () => {
+  const T = loadApp();
+  const f = T.fromUsda({fdcId: 1105314, description: 'Banana, raw', dataType: 'Survey (FNDDS)',
+    foodNutrients: [{nutrientId: 1008, value: 97}, {nutrientId: 1003, value: 0.74}, {nutrientId: 1005, value: 22.71}, {nutrientId: 1004, value: 0.28}, {nutrientId: 1079, value: 1.7}],
+    foodMeasures: [{disseminationText: 'Quantity not specified', gramWeight: 118}, {disseminationText: '1 banana', gramWeight: 126}]});
+  assert.equal(f.per100.kcal, 97);
+  assert.deepEqual(f.servings.map(s => s.label), ['1 banana'], '"Quantity not specified" is dropped');
+  const {grams, totals} = T.portionTotals(f, 1, 's0');
+  assert.equal(grams, 126);
+  assert.equal(totals.kcal, 122.2);
+  // Foundation foods that only report Atwater energy still get calories
+  const g = T.fromUsda({fdcId: 1, description: 'Chicken breast, cooked', dataType: 'Foundation', foodNutrients: [{nutrientId: 2047, value: 165}, {nutrientId: 1003, value: 31}]});
+  assert.equal(g.per100.kcal, 165);
+});
+
+test('food: Open Food Facts products convert, kJ-only labels included', () => {
+  const T = loadApp();
+  const f = T.fromOff({code: '123', product_name: 'Bar', brands: 'Quest, Other', serving_quantity: '60', serving_size: '1 bar (60 g)',
+    nutriments: {energy_100g: 1590, proteins_100g: 35, carbohydrates_100g: 38, fat_100g: 13}});
+  assert.equal(f.brand, 'Quest');
+  assert.equal(f.per100.kcal, 380);
+  assert.equal(T.portionTotals(f, 1, 's0').totals.p, 21);
+  assert.equal(f.servings[0].label, '1 bar (60 g)', 'the label’s own serving wording is kept as is');
+  assert.equal(T.fromOff({code: '9', product_name: 'No data', nutriments: {}}), null, 'products without energy are skipped');
+});
+
+test('food: plain matches rank above processed ones', () => {
+  const T = loadApp();
+  const names = ['Lunchmeat, chicken breast, sliced', 'Chicken breast tenders, breaded, cooked', 'Chicken breast, roasted'];
+  const ranked = T.rankFoods(names.map(n => ({name: n, source: 'usda'})), 'chicken breast');
+  assert.equal(ranked[0].name, 'Chicken breast, roasted');
+});
+
+test('food: targets come from the InBody BMR when there is one, and the goal moves them', () => {
+  const T = loadApp();
+  T.S.body = [{id: 'w', kind: 'weight', date: Date.now() - DAY, w: 200, unit: 'lb'}];
+  T.S.profile.goal = {type: 'maintain', rate: 0};
+  assert.equal(T.autoTargets().kcal, 3000, '200 lb × 15');
+  T.S.body.push({id: 's', kind: 'scan', date: Date.now() - 2 * DAY, unit: 'lb', weight: 200, bmr: 1800, seg: {}});
+  assert.equal(T.autoTargets().kcal, 2700, 'BMR 1800 × 1.5');
+  T.S.profile.goal = {type: 'cut', rate: 1};
+  const t = T.autoTargets();
+  assert.equal(t.kcal, 2200, '1 lb/week cut = −500 kcal/day');
+  assert.equal(t.p, 180);
+  assert.equal(t.c, Math.round((2200 - 180 * 4 - 70 * 9) / 4));
 });

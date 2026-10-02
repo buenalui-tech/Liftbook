@@ -17,8 +17,10 @@ for d in ['css', 'js']:
 shutil.copy(os.path.join(ROOT, 'tests', 'mock-supabase.js'), OUT)
 
 html = open(os.path.join(ROOT, 'index.html')).read()
+import re
+usda = re.search(r"usdaApiKey:\s*'([^']*)'", open(os.path.join(ROOT, 'config.js')).read())
 html = html.replace('<script src="config.js"></script>',
-                    '<script>window.LIFTBOOK_CONFIG={supabaseUrl:"https://mock.supabase.co",supabaseAnonKey:"mock"};</script>')
+                    '<script>window.LIFTBOOK_CONFIG={supabaseUrl:"https://mock.supabase.co",supabaseAnonKey:"mock",usdaApiKey:"%s"};</script>' % (usda.group(1) if usda else ''))
 html = html.replace('<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.2/dist/umd/supabase.js"></script>',
                     '<script src="mock-supabase.js"></script>')
 assert 'mock-supabase.js' in html, 'Supabase script tag changed; update this script'

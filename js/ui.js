@@ -14,7 +14,7 @@ function render() {
   else if (S.screen === 'workout' && S.active) html = viewWorkout();
   else {
     html = `<div class="wrap">${
-      S.tab === 'today' ? viewToday() : S.tab === 'progress' ? viewProgress() : S.tab === 'body' ? viewBody() : viewProgram()
+      S.tab === 'today' ? viewToday() : S.tab === 'food' ? viewFood() : S.tab === 'progress' ? viewProgress() : S.tab === 'body' ? viewBody() : viewProgram()
     }</div>${S.active ? `<div class="resume"><button data-act="resume"><span>Resume ${esc(S.active.routineName)}</span><span class="num" id="resume-clock">${fmtDur((Date.now() - S.active.startedAt) / 1000)}</span></button></div>` : ''}${viewTabs()}`;
   }
   html += viewSheet();
@@ -30,10 +30,12 @@ function render() {
   if (focused) { const el = document.getElementById(focused); if (el && el.tagName === 'INPUT' && el.type !== 'range') el.focus({preventScroll: true}); }
   shownScan = null;
   Fig.attach();
+  // the camera lives outside the redraw: keep it in the scan sheet, stop it when the sheet goes
+  if (S.sheet && S.sheet.type === 'barcode' && !S.sheet.err && !S.sheet.looking && !S.sheet.notFound) Scanner.start(); else if (Scanner.video) Scanner.stop();
 }
 function viewTabs() {
   const t = (id, label, icon) => `<button data-act="tab" data-v="${id}" ${S.tab === id ? 'aria-current="page"' : ''}>${ICON[icon]}<span>${label}</span></button>`;
-  return `<div class="tabs"><nav>${t('today','Today','today')}${t('progress','Progress','prog')}${t('body','Body','body')}${t('program','Program','plan')}</nav></div>`;
+  return `<div class="tabs"><nav>${t('today','Today','today')}${t('food','Food','food')}${t('progress','Progress','prog')}${t('body','Body','body')}${t('program','Program','plan')}</nav></div>`;
 }
 function brand(sub) { return `<div class="brand"><h1>Lift<span>book</span></h1><div class="row" style="gap:8px">${syncPill()}<small>${sub || ''}</small></div></div>`; }
 const IN_CLAUDE = !!(window.claude && typeof window.claude.use === 'function');
@@ -114,6 +116,7 @@ function viewToday() {
       <div class="week">${days}</div>
       ${nav}
     </section>
+    ${isToday ? todayFoodCard() : ''}
     ${isToday ? todayWeighIn() : (weigh ? `<button class="hitem weigh" data-act="tab" data-v="body"><span class="row between" style="width:100%"><span class="small muted">Weigh-in</span><b class="num">${f1(conv(weigh.w, weigh.unit))} ${unit()}</b></span></button>` : '')}
     ${logged}
     ${logBtn}
@@ -342,6 +345,16 @@ function viewSheet() {
     body = viewScanSheet();
   } else if (S.sheet.type === 'detail' && S.sheet.edit) {
     body = viewEditWorkout();
+  } else if (S.sheet.type === 'add-food') {
+    body = viewAddFood();
+  } else if (S.sheet.type === 'portion') {
+    body = viewPortion();
+  } else if (S.sheet.type === 'custom-food') {
+    body = viewCustomFood();
+  } else if (S.sheet.type === 'barcode') {
+    body = viewScan();
+  } else if (S.sheet.type === 'targets') {
+    body = viewTargets();
   } else if (S.sheet.type === 'feedback') {
     body = viewFeedbackSheet();
   } else if (S.sheet.type === 'pick') {

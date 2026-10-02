@@ -2,7 +2,7 @@
 // Classic script: files load in order (see index.html) and share top-level names.
 
 /* ---------- helpers ---------- */
-const APP_VERSION = '20';   // keep in step with VERSION in sw.js (liftbook-v20)
+const APP_VERSION = '21';   // keep in step with VERSION in sw.js (liftbook-v21)
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 const slug = s => String(s).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'exercise';
@@ -22,6 +22,7 @@ const ICON = {
   hist:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="4" y="4" width="16" height="17" rx="2"/><path d="M8 2v4M16 2v4M4 10h16"/></svg>',
   prog:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 20h18M5 16l5-5 4 3 6-7"/></svg>',
   body:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="4.5" r="2.5"/><path d="M7 9.5h10M12 9.5v5M9.5 21l2.5-6.5 2.5 6.5M7 9.5l-1.5 5M17 9.5l1.5 5"/></svg>',
+  food:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 3v7a2 2 0 0 0 2 2v9M11 3v7a2 2 0 0 1-2 2M9 3v6M17 21V3c-2 1.5-3 4-3 7s1 4 3 4"/></svg>',
   plan:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01"/></svg>'
 };
 
@@ -133,23 +134,25 @@ const DEFAULT_PROFILE = {unit:'lb', bar:45, weeklyGoal:4};
 const LS_KEY = 'liftbook.v1';
 const lsRead = () => { try { return JSON.parse(localStorage.getItem(LS_KEY)) || {}; } catch { return {}; } };
 const lsWrite = o => { try { localStorage.setItem(LS_KEY, JSON.stringify(o)); return true; } catch { return false; } };
-const freshMeta = () => ({stamps: {profile: 0, program: 0, active: 0}, userId: null, dirtyS: false, dirtyW: [], delW: [], cursor: null, dirtyB: [], delB: [], cursorB: null, lastSync: 0});
+const freshMeta = () => ({stamps: {profile: 0, program: 0, active: 0}, userId: null, dirtyS: false, dirtyW: [], delW: [], cursor: null, dirtyB: [], delB: [], cursorB: null, dirtyF: [], delF: [], cursorF: null, lastSync: 0});
 // Lists that sync row-by-row: each finished workout, and each weigh-in or body scan.
 const COLLS = [
   {table: 'workouts', dirty: 'dirtyW', del: 'delW', cursor: 'cursor', list: () => S.workouts, stamp: x => x.updatedAt || x.startedAt,
    sort: () => S.workouts.sort((a, b) => b.startedAt - a.startedAt), extra: w => ({started_at: w.startedAt}), tomb: {started_at: 0}},
   {table: 'body_entries', dirty: 'dirtyB', del: 'delB', cursor: 'cursorB', list: () => S.body, stamp: x => x.updatedAt || x.date,
-   sort: () => S.body.sort((a, b) => b.date - a.date), extra: e => ({kind: e.kind, date: e.date}), tomb: {kind: 'deleted', date: 0}}
+   sort: () => S.body.sort((a, b) => b.date - a.date), extra: e => ({kind: e.kind, date: e.date}), tomb: {kind: 'deleted', date: 0}},
+  {table: 'food_entries', dirty: 'dirtyF', del: 'delF', cursor: 'cursorF', list: () => S.food, stamp: x => x.updatedAt || x.date,
+   sort: () => S.food.sort((a, b) => b.date - a.date), extra: e => ({kind: e.kind, date: e.date}), tomb: {kind: 'deleted', date: 0}}
 ];
 
 const store = {
   mode: 'local',
   load() {
     const o = lsRead();
-    return {profile: o.profile || null, program: o.program || null, active: o.active || null, workouts: o.workouts || [], body: o.body || [], meta: {...freshMeta(), ...(o.meta || {})}};
+    return {profile: o.profile || null, program: o.program || null, active: o.active || null, workouts: o.workouts || [], body: o.body || [], food: o.food || [], meta: {...freshMeta(), ...(o.meta || {})}};
   },
   persistLocal() {
-    if (!lsWrite({profile: S.profile, program: S.program, active: S.active, workouts: S.workouts, body: S.body, meta: S.meta}))
+    if (!lsWrite({profile: S.profile, program: S.program, active: S.active, workouts: S.workouts, body: S.body, food: S.food, meta: S.meta}))
       toast('This phone is out of storage space. Export a backup.');
   },
   touch(field) { S.meta.stamps[field] = Date.now(); S.meta.dirtyS = true; S.meta.gen = (S.meta.gen || 0) + 1; },
@@ -169,6 +172,8 @@ const store = {
   saveWorkout(w) { this.saveRow(COLLS[0], w); },
   deleteWorkout(id) { this.deleteRow(COLLS[0], id); },
   saveBody(e) { this.saveRow(COLLS[1], e); },
+  saveFood(e) { this.saveRow(COLLS[2], e); },
+  deleteFood(id) { this.deleteRow(COLLS[2], id); },
   deleteBody(id) { this.deleteRow(COLLS[1], id); }
 };
 
@@ -197,7 +202,7 @@ const Sync = {
   onSignedIn() {
     if (S.meta.userId && S.meta.userId !== this.user.id) {
       // a different account on this phone: start from that account's cloud log
-      S.workouts = []; S.body = []; S.active = null; S.program = null; S.profile = {...DEFAULT_PROFILE};
+      S.workouts = []; S.body = []; S.food = []; S.active = null; S.program = null; S.profile = {...DEFAULT_PROFILE};
       S.meta = freshMeta();
     }
     if (!S.meta.userId) {
@@ -345,5 +350,5 @@ const S = {
   tab: 'today', screen: 'tabs', sheet: null, menuEx: null, editRoutine: null,
   progressEx: null, rest: null, armed: null, summary: null,
   meta: freshMeta(), authEmail: '', authMsg: '', authBusy: false,
-  body: [], scanIdx: null, scanCompare: 'prev', bodySeg: null, wtRange: 90, wtAll: false, wtOpen: false, scanMsg: ''
+  body: [], food: [], scanIdx: null, scanCompare: 'prev', bodySeg: null, wtRange: 90, wtAll: false, wtOpen: false, scanMsg: ''
 };

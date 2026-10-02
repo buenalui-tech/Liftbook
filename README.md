@@ -5,6 +5,7 @@ A workout log that runs in your phone's browser and installs to the home screen.
 - Logs sets, shows what you did last time, and runs a rest timer
 - Double progression: once every set reaches the top of the rep range, it tells you to add weight
 - Plate loading for barbell lifts, records, strength charts, and weekly sets per muscle
+- Food tab: search USDA FoodData Central and Open Food Facts, scan barcodes, log meals with portions, quick add, custom foods, daily calorie and macro targets
 - Body tab: daily weigh-ins with a 7-day trend and weekly rate, InBody scans, and an avatar drawn from each scan's segmental lean and fat mass
 - Works offline once installed
 - Saves on the phone first (works offline), then syncs to your Supabase account when signed in
@@ -21,6 +22,7 @@ A workout log that runs in your phone's browser and installs to the home screen.
 | `sw.js` | Offline cache. **Bump `VERSION` (and `APP_VERSION` in `js/core.js`) on every release** |
 | `supabase/setup.sql` | Database tables and privacy rules for a new project. Run once in the Supabase SQL Editor (not used by the site) |
 | `supabase/002_body_entries.sql` | Adds the weigh-in and scan table to an existing project |
+| `supabase/003_feedback_and_errors.sql`, `004_food_entries.sql` | Feedback/crash tables; food log table |
 | `tests/` | `node --test tests/app.test.mjs` runs the logic tests; `make_harness.py` builds a copy wired to a fake Supabase (not used by the site) |
 | `icon-192.png`, `icon-512.png`, `apple-touch-icon.png` | App icons, drawn by `tools/make_icons.py` |
 
