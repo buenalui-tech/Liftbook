@@ -1,0 +1,271 @@
+// Liftbook — Taps, typing, swipes and app startup.
+// Classic script: files load in order (see index.html) and share top-level names.
+
+/* ---------- events ---------- */
+let armT;
+function arm(key) { if (S.armed === key) return true; S.armed = key; clearTimeout(armT); armT = setTimeout(() => { S.armed = null; render(); }, 3500); render(); return false; }
+function disarm() { S.armed = null; clearTimeout(armT); }
+
+const A = {
+  tab: d => { S.tab = d.v; S.sheet = null; render(); window.scrollTo(0, 0); },
+  start: d => startWorkout(d.v),
+  resume: () => { S.screen = 'workout'; render(); wake(); },
+  minimize: () => { S.screen = 'tabs'; render(); },
+  set: d => toggleSet(+d.e, +d.s),
+  warm: d => { const s = S.active.exercises[+d.e].sets[+d.s]; s.warm = !s.warm; saveActiveSoon(); render(); },
+  'add-set': d => { const e = S.active.exercises[+d.e], l = e.sets[e.sets.length - 1]; e.sets.push({w: l ? l.w : null, r: null, done: false, warm: false}); saveActiveSoon(); render(); },
+  'rm-set': d => { const e = S.active.exercises[+d.e]; if (e.sets.length > 1) e.sets.pop(); saveActiveSoon(); render(); },
+  'ex-menu': d => { S.menuEx = S.menuEx === +d.e ? null : +d.e; render(); },
+  'ex-up': d => { const i = +d.e, xs = S.active.exercises; if (i > 0) { [xs[i - 1], xs[i]] = [xs[i], xs[i - 1]]; S.menuEx = i - 1; } saveActiveSoon(); render(); },
+  'ex-down': d => { const i = +d.e, xs = S.active.exercises; if (i < xs.length - 1) { [xs[i + 1], xs[i]] = [xs[i], xs[i + 1]]; S.menuEx = i + 1; } saveActiveSoon(); render(); },
+  'ex-remove': d => { if (!arm('rmex' + d.e)) return; disarm(); S.active.exercises.splice(+d.e, 1); S.menuEx = null; saveActiveSoon(); render(); },
+  'rest-add': d => { if (S.rest) { S.rest.endAt += (+d.v) * 1000; S.rest.total = Math.max(5, S.rest.total + (+d.v)); S.rest.rang = false; } render(); },
+  'rest-skip': () => { S.rest = null; render(); },
+  'finish-open': () => { S.sheet = {type:'finish'}; render(); },
+  finish: () => finishWorkout(),
+  discard: () => { if (!arm('discard')) return; disarm(); discardWorkout(); },
+  'sheet-close': () => { S.sheet = null; disarm(); render(); },
+  scrim: (d, ev) => { if (S.sheet && S.sheet.edit) return;   // don't drop unsaved edits on a stray tap
+    if (ev.target.classList.contains('scrim')) { S.sheet = null; disarm(); render(); } },
+  'add-ex-open': () => { S.sheet = {type:'add-ex', q:''}; render(); },
+  'add-ex': d => { const ex = libraryExercises().find(x => x.id === d.v); if (!ex) return; S.active.exercises.push(buildEx(ex)); S.sheet = null; saveActiveSoon(); render(); window.scrollTo(0, document.body.scrollHeight); },
+  'add-custom': () => {
+    const name = (S.sheet.q || '').trim(); if (!name) return;
+    const muscle = document.getElementById('add-m').value, kind = document.getElementById('add-k').value;
+    S.active.exercises.push(buildEx({id: slug(name), name, sets: 3, repMin: 8, repMax: 12, kind, muscle, rest: 90, timed: false}));
+    S.sheet = null; saveActiveSoon(); render(); window.scrollTo(0, document.body.scrollHeight);
+  },
+  detail: d => { S.sheet = {type:'detail', id:d.v}; render(); },
+  'del-workout': d => { if (!arm('del' + d.v)) return; disarm(); S.workouts = S.workouts.filter(w => w.id !== d.v); S.sheet = null; store.deleteWorkout(d.v); recomputePRs(); render(); toast('Workout deleted'); },
+  'ed-open': d => openEditor(d.v),
+  day: d => { S.day = +d.v; render(); },
+  'cal-day': d => { S.calDay = S.calDay === +d.v ? null : +d.v; render(); },
+  'cal-month': d => { const today = new Date(); const cur = new Date(S.calMonth || new Date(today.getFullYear(), today.getMonth(), 1).getTime());
+    const next = new Date(cur.getFullYear(), cur.getMonth() + (+d.v), 1); if (next > today) return; S.calMonth = next.getTime(); S.calDay = null; render(); },
+  'show-all': () => { S.showAll = !S.showAll; render(); },
+  'day-step': d => stepDay(+d.v),
+  'log-open': () => { S.sheet = {type: 'log', day: S.day || startOfDay(Date.now())}; render(); },
+  'log-activity': () => { S.sheet.form = activityForm(S.sheet.day); render(); },
+  'log-strength': () => { const day = S.sheet.day; if (day === startOfDay(Date.now())) startCustomWorkout(); else newWorkoutEditor(day); },
+  'act-type': d => { S.sheet.form.type = d.v; S.sheet.form.msg = ''; render(); },
+  'act-save': () => saveActivity(),
+  'act-edit': d => { const w = S.workouts.find(x => x.id === d.v); S.sheet = {type: 'log', day: startOfDay(w.startedAt), form: activityForm(null, w)}; render(); },
+  'ed-cancel': () => { S.sheet = S.sheet.edit && S.sheet.edit.isNew ? null : {type: 'detail', id: S.sheet.id}; render(); },
+  'ed-save': () => saveEditor(),
+  'ed-warm': d => { const s = S.sheet.edit.exercises[+d.e].sets[+d.s]; s.warm = !s.warm; render(); },
+  'ed-add-set': d => { const e = S.sheet.edit.exercises[+d.e], l = e.sets[e.sets.length - 1]; e.sets.push({w: l ? l.w : null, r: null, done: true, warm: false}); render(); },
+  'ed-rm-set': d => { S.sheet.edit.exercises[+d.e].sets.splice(+d.s, 1); render(); },
+  'ed-rm-ex': d => { S.sheet.edit.exercises.splice(+d.e, 1); render(); },
+  'ed-add-ex': () => {
+    const x = libraryExercises().find(e => e.id === document.getElementById('ed-add-sel').value); if (!x) return;
+    S.sheet.edit.exercises.push({exId: x.id, name: x.name, kind: x.kind, muscle: x.muscle, muscles: x.muscles, repMin: x.repMin, repMax: x.repMax, rest: x.rest, timed: !!x.timed, target: x.sets, sets: [{w: null, r: null, done: true, warm: false}]});
+    render();
+  },
+  'dismiss-summary': () => { S.summary = null; render(); },
+  'sync-now': () => Sync.run(true),
+  'feedback-open': () => { S.sheet = {type: 'feedback', kind: 'bug', msg: '', from: currentScreen()}; render(); },
+  'fb-kind': d => { S.sheet.kind = d.v; render(); },
+  'fb-send': () => sendFeedback(),
+  'wl-next': () => { S.welcomeStep = (S.welcomeStep || 0) + 1; render(); window.scrollTo(0, 0); },
+  'wl-done': () => finishWelcome(),
+  'wl-browser': () => { S.welcomeInBrowser = true; render(); },
+  'install-now': async () => { if (!installEvent) return; installEvent.prompt(); try { await installEvent.userChoice; } catch {} installEvent = null; render(); },
+  'install-dismiss': () => { try { localStorage.setItem(INSTALL_KEY, '1'); } catch {} render(); },
+  'share-open': d => { S.sheet = {type: 'share', id: d.v}; render(); prepareShare(); },
+  'share-theme': d => { if ((S.profile.shareTheme || 'dark') === d.v) return; S.profile.shareTheme = d.v; store.saveProfile(); const sh = S.sheet; if (sh.url) URL.revokeObjectURL(sh.url); sh.url = null; sh.blob = null; render(); prepareShare(); },
+  'share-go': () => shareGo(),
+  'scan-open': d => { S.sheet = {type: 'scan', id: d.v || null}; S.scanMsg = ''; disarm(); render(); },
+  'scan-del': d => { if (!arm('scandel')) return; disarm(); S.body = S.body.filter(e => e.id !== d.v); store.deleteBody(d.v); S.sheet = null; S.scanIdx = null; render(); toast('Scan deleted'); },
+  seg: d => { S.bodySeg = S.bodySeg === d.v ? null : d.v; render(); },
+  'scan-compare': d => { S.scanCompare = d.v; render(); },
+  'wt-range': d => { S.wtRange = d.v === 'all' ? 'all' : +d.v; render(); },
+  'wt-chart': (d, ev) => {
+    const c = S.wtChart, svg = ev.target.closest('svg'); if (!c || !svg) return;
+    const r = svg.getBoundingClientRect(), vx = (ev.clientX - r.left) / r.width * c.W;
+    const t = c.t0 + (vx - c.x0) / (c.x1 - c.x0) * c.span;
+    const near = c.pts.reduce((a, p) => Math.abs(p.t - t) < Math.abs(a.t - t) ? p : a);
+    S.wtSel = S.wtSel === near.t ? null : near.t; render();
+  },
+  'wt-all': () => { S.wtAll = true; S.wtOpen = true; render(); },
+  'wt-del': d => { if (!arm('wtdel' + d.v)) return; disarm(); S.body = S.body.filter(e => e.id !== d.v); store.deleteBody(d.v); S.wtOpen = true; render(); toast('Weigh-in deleted'); },
+  goal: d => { const g = S.profile.goal || {}; S.profile.goal = {type: d.v, rate: g.rate || (unit() === 'kg' ? 0.25 : 0.5)}; store.saveProfile(); render(); },
+  'sign-out': async () => { if (!arm('signout')) return; disarm(); await Sync.signOut(); S.authMsg = '✓ Signed out. Your log stays on this phone.'; render(); },
+  'edit-routine': d => { S.editRoutine = d.v || null; disarm(); render(); },
+  'p-up': d => { const xs = S.program.routines[+d.r].exercises, i = +d.x; if (i > 0) { [xs[i - 1], xs[i]] = [xs[i], xs[i - 1]]; saveProgramSoon(); render(); } },
+  'p-rm': d => { if (!arm(`prm${d.r}-${d.x}`)) return; disarm(); S.program.routines[+d.r].exercises.splice(+d.x, 1); saveProgramSoon(); render(); },
+  'pick-open': d => { S.sheet = {type: 'pick', r: +d.r, q: ''}; render(); },
+  'pick-ex': d => { const x = libraryExercises().find(e => e.id === d.v); if (x) addToDay(S.sheet.r, x); },
+  'pick-custom': () => {
+    const name = (document.getElementById('pick-name').value || '').trim();
+    if (!name) { toast('Give the exercise a name.'); return; }
+    addToDay(S.sheet.r, {id: slug(name), name, muscle: document.getElementById('pick-muscle').value, kind: document.getElementById('pick-kind').value,
+      timed: document.getElementById('pick-timed').checked, repMin: document.getElementById('pick-timed').checked ? 30 : 8, repMax: document.getElementById('pick-timed').checked ? 60 : 12});
+  },
+  'prog-new': () => setProgram(EMPTY_PROGRAM(), 'Program created. Add exercises to Day 1.', 'program'),
+  'prog-template': () => setProgram(JSON.parse(JSON.stringify(TEMPLATE)), 'Jeff Nippard 4-Day Upper/Lower loaded'),
+  'prog-replace': () => { S.sheet = {type: 'program-choose'}; render(); },
+  'day-add': () => { const d = newDay(S.program.routines.length + 1); S.program.routines.push(d); S.editRoutine = d.id; store.saveProgram(); render(); },
+  'day-rm': d => { if (!arm('dayrm' + d.r)) return; disarm(); S.program.routines.splice(+d.r, 1); S.editRoutine = null; store.saveProgram(); render(); toast('Day deleted'); },
+  'day-move': d => { const rs = S.program.routines, i = +d.r, j = i + (+d.v); if (j < 0 || j >= rs.length) return; [rs[i], rs[j]] = [rs[j], rs[i]]; store.saveProgram(); render(); },
+  'export-program': () => offerFile(`${slug(S.program.name)}-program.json`, JSON.stringify({app: 'liftbook', type: 'program', version: 1, program: S.program}, null, 2)),
+  unit: d => { if (S.profile.unit === d.v) return; const was = S.profile.unit; S.profile.unit = d.v; if (Number(S.profile.bar) === (was === 'kg' ? 20 : 45)) S.profile.bar = d.v === 'kg' ? 20 : 45; store.saveProfile(); render(); },
+  'export-json': () => offerFile(`liftbook-backup-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify({app:'liftbook', version:1, exportedAt:new Date().toISOString(), profile:S.profile, program:S.program, workouts:S.workouts, body:S.body}, null, 2)),
+  'export-csv': () => {
+    const rows = [['date','routine','exercise','set','warmup','weight','unit','reps_or_seconds']];
+    for (const w of [...S.workouts].reverse()) {
+      if (isActivity(w)) { rows.push([new Date(w.startedAt).toISOString(), w.routineName, `activity: ${w.type}`, '', '', w.distance ?? '', w.distance ? w.distUnit : '', Math.round((w.endedAt - w.startedAt) / 1000)]); continue; }
+      for (const e of w.exercises) e.sets.forEach((s, i) => rows.push([new Date(w.startedAt).toISOString(), w.routineName, e.name, i + 1, s.warm ? 1 : 0, s.w ?? '', w.unit, s.r ?? '']));
+    }
+    offerFile(`liftbook-sets-${new Date().toISOString().slice(0, 10)}.csv`, rows.map(r => r.map(c => /[",\n]/.test(String(c)) ? `"${String(c).replace(/"/g, '""')}"` : c).join(',')).join('\n'));
+  }
+};
+function markBackup(filename) { if (filename.endsWith('.json')) { S.profile.lastBackup = Date.now(); store.saveProfile(); render(); } }
+async function offerFile(filename, data) {
+  if (IN_CLAUDE) {
+    let dl = null; try { dl = await window.claude.use('downloads'); } catch {}
+    if (dl) { try { await dl.save({filename, data}); markBackup(filename); } catch (e) { if (e && e.code !== 'declined') toast('Could not save the file here.'); } return; }
+  }
+  const type = filename.endsWith('.csv') ? 'text/csv' : 'application/json';
+  // phones: the share sheet offers Save to Files / Drive / email
+  try {
+    const file = new File([data], filename, {type});
+    if (navigator.canShare && navigator.canShare({files: [file]})) { await navigator.share({files: [file], title: filename}); markBackup(filename); return; }
+  } catch (e) { if (e && e.name === 'AbortError') return; }
+  try {
+    const url = URL.createObjectURL(new Blob([data], {type}));
+    const a = document.createElement('a'); a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 4000); markBackup(filename); return;
+  } catch {}
+  try { await navigator.clipboard.writeText(data); toast('Copied to clipboard'); } catch { toast('Saving files is not available here.'); }
+}
+
+document.addEventListener('click', ev => {
+  unlockAudio();
+  const el = ev.target.closest('[data-act]'); if (!el) return;
+  const fn = A[el.dataset.act]; if (!fn) return;
+  if (el.dataset.act === 'scrim' && el !== ev.target) return;
+  fn(el.dataset, ev);
+});
+document.addEventListener('input', ev => {
+  const el = ev.target, k = el.dataset && el.dataset.in; if (!k) return;
+  if (k === 'w' || k === 'r') {
+    const e = S.active.exercises[+el.dataset.e], s = e.sets[+el.dataset.s];
+    const v = el.value.trim() === '' ? null : parseFloat(el.value.replace(',', '.'));
+    const old = s[k];
+    s[k] = v == null || isNaN(v) ? null : (k === 'r' ? Math.round(v) : v);
+    // a new weight carries down to the unfinished sets below that were blank or matched the old weight
+    if (k === 'w' && s.w != null) e.sets.forEach((x, i) => {
+      if (i <= +el.dataset.s || x.done || !(x.w == null || x.w === old)) return;
+      x.w = s.w; const inp = document.getElementById(`w-${el.dataset.e}-${i}`); if (inp) inp.value = fmtW(s.w);
+    });
+    if (k === 'w' && e.kind === 'barbell') { const box = document.getElementById('plates-' + el.dataset.e); if (box) box.innerHTML = platesHTML(e.sets.map(x => x.w).filter(x => x > 0).pop() || 0); }
+    saveActiveSoon();
+  } else if (k === 'add-q') {
+    S.sheet.q = el.value; const pos = el.selectionStart; render();
+    const n = document.getElementById('add-q'); if (n) { n.focus(); try { n.setSelectionRange(pos, pos); } catch {} }
+  } else if (k.startsWith('p-')) {
+    const ex = S.program.routines[+el.dataset.r].exercises[+el.dataset.x], f = k.slice(2);
+    if (f === 'name') { const nm = el.value.trim(); if (nm) { ex.name = nm; ex.id = slug(nm); } }
+    else { const n = parseInt(el.value, 10); if (n > 0) ex[f] = n; if (ex.repMax < ex.repMin && f !== 'rest' && f !== 'sets') {} }
+    saveProgramSoon();
+  } else if (k === 'auth-email') { S.authEmail = el.value;
+  } else if (k === 'scan-idx') { showScan(+el.value);
+  } else if (k === 'ed-w' || k === 'ed-r') {
+    const s = S.sheet.edit.exercises[+el.dataset.e].sets[+el.dataset.s], t = el.value.trim().replace(',', '.');
+    const v = t === '' ? null : parseFloat(t); s[k === 'ed-w' ? 'w' : 'r'] = v == null || isNaN(v) ? null : (k === 'ed-r' ? Math.round(v) : v);
+  } else if (k === 'ed-date') { S.sheet.edit.dateStr = el.value;
+  } else if (k === 'ed-name') { S.sheet.edit.routineName = el.value;
+  } else if (k === 'fb-msg') { S.sheet.msg = el.value;
+  } else if (k === 'prog-name') { S.program.name = el.value.trim() || 'My program'; saveProgramSoon();
+  } else if (k === 'day-name') {
+    const i = +el.dataset.r, r = S.program.routines[i]; r.name = el.value.trim() || `Day ${i + 1}`;
+    // badges must tell days apart: fall back to first letter + day number when two would match
+    const t = tagFor(r.name); r.tag = S.program.routines.some((x, j) => j !== i && x.tag === t) ? r.name[0].toUpperCase() + (i + 1) : t;
+    saveProgramSoon();
+  } else if (k === 'day-focus') { S.program.routines[+el.dataset.r].focus = el.value.trim(); saveProgramSoon();
+  } else if (k === 'pick-q') { S.sheet.q = el.value; const pos = el.selectionStart; render(); const n = document.getElementById('pick-q'); if (n) { n.focus(); try { n.setSelectionRange(pos, pos); } catch {} }
+  } else if (k === 'act') { S.sheet.form[el.dataset.f] = el.value;
+  } else if (k === 'ed-dur') { S.sheet.edit.durMin = el.value;
+  } else if (k === 'ed-cal') { const n = parseInt(el.value, 10); S.sheet.edit.calories = n > 0 ? n : null;
+  } else if (k === 'goal-rate') { const n = parseFloat(el.value); if (n > 0 && n < 5) { S.profile.goal = {...(S.profile.goal || {type: 'cut'}), rate: n}; later('profile', () => store.saveProfile()); }
+  } else if (k === 'bar') { const n = parseFloat(el.value); if (n >= 0) { S.profile.bar = n; later('profile', () => store.saveProfile()); } }
+  else if (k === 'goal') { const n = parseInt(el.value, 10); if (n > 0 && n < 15) { S.profile.weeklyGoal = n; later('profile', () => store.saveProfile()); } }
+});
+document.addEventListener('change', ev => {
+  const el = ev.target;
+  if (el.dataset && el.dataset.in === 'prog-ex') { S.progressEx = el.value; render(); }
+  if (el.dataset && el.dataset.in && el.dataset.in.startsWith('p-')) render();
+  if (el.id === 'import-file' && el.files && el.files[0]) importFile(el.files[0]);
+  if (el.id === 'program-file' && el.files && el.files[0]) importProgramFile(el.files[0]);
+});
+document.addEventListener('submit', ev => {
+  const id = ev.target.id;
+  if (!['auth-form', 'wt-form', 'scan-form'].includes(id)) return;
+  ev.preventDefault();
+  if (id === 'auth-form') authSubmit(ev.submitter && ev.submitter.dataset.mode === 'up' ? 'up' : 'in');
+  if (id === 'wt-form') logWeight();
+  if (id === 'scan-form') saveScanForm();
+});
+function stepDay(n) {
+  const today = startOfDay(Date.now()), next = startOfDay((S.day || today) + n * DAY + 12 * 3600000);
+  if (next > today) return;
+  S.day = next; render();
+}
+// swipe left/right anywhere on the Today tab (outside the 3D figure) to move between days
+let swipe = null;
+document.addEventListener('touchstart', ev => {
+  if (S.tab !== 'today' || S.screen !== 'tabs' || S.sheet || ev.touches.length !== 1 || ev.target.closest('.fig-host, input, select')) { swipe = null; return; }
+  swipe = {x: ev.touches[0].clientX, y: ev.touches[0].clientY};
+}, {passive: true});
+document.addEventListener('touchend', ev => {
+  if (!swipe) return;
+  const t = ev.changedTouches[0], dx = t.clientX - swipe.x, dy = t.clientY - swipe.y; swipe = null;
+  if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.5) stepDay(dx < 0 ? 1 : -1);
+}, {passive: true});
+document.addEventListener('toggle', ev => { if (ev.target.id === 'wt-details') S.wtOpen = ev.target.open; }, true);
+async function importProgramFile(file) {
+  try {
+    const o = JSON.parse(await file.text()), p = o && o.program;
+    if (!p || !Array.isArray(p.routines) || !p.routines.every(r => r && Array.isArray(r.exercises))) throw new Error('bad');
+    p.id = p.id || newId(); p.routines.forEach((r, i) => { r.id = r.id || newId(); r.name = r.name || `Day ${i + 1}`; r.tag = r.tag || tagFor(r.name); });
+    setProgram(p, `${p.name || 'Program'} imported`);
+  } catch { toast('That file isn’t a Liftbook program.'); }
+}
+async function importFile(file) {
+  try {
+    const o = JSON.parse(await file.text());
+    if (!o || !Array.isArray(o.workouts)) throw new Error('bad');
+    const have = new Set(S.workouts.map(w => w.id)); let added = 0;
+    for (const w of o.workouts) if (w && w.id && Array.isArray(w.exercises) && !have.has(w.id)) { S.workouts.push(w); added++; store.saveWorkout(w); }
+    S.workouts.sort((a, b) => b.startedAt - a.startedAt);
+    const haveB = new Set(S.body.map(e => e.id));
+    for (const e of (Array.isArray(o.body) ? o.body : [])) if (e && e.id && e.kind && !haveB.has(e.id)) { S.body.push(e); store.saveBody(e); }
+    S.body.sort((a, b) => b.date - a.date);
+    if (o.program && Array.isArray(o.program.routines)) { S.program = o.program; store.saveProgram(); }
+    if (o.profile && o.profile.unit) { S.profile = {...DEFAULT_PROFILE, ...o.profile}; store.saveProfile(); }
+    store.persistLocal(); render(); toast(`Imported ${added} workout${added === 1 ? '' : 's'}`);
+  } catch { toast('That file is not a Liftbook backup.'); }
+}
+
+/* ---------- boot ---------- */
+(async () => {
+  const d = store.load();
+  S.meta = d.meta;
+  S.profile = {...DEFAULT_PROFILE, ...(d.profile || {})};
+  S.program = d.program || null;   // new users choose: build from scratch, a template, or an imported program
+  S.workouts = (d.workouts || []).sort((a, b) => b.startedAt - a.startedAt);
+  S.body = (d.body || []).sort((a, b) => b.date - a.date);
+  S.active = d.active || null;
+  // defaults keep a zero timestamp so they never overwrite a program already saved in the cloud
+  if (!d.program || !d.profile) store.persistLocal();
+  if (needsWelcome()) S.screen = 'welcome';
+  S.ready = true; render();
+  // ask the browser not to evict the log when storage runs low
+  try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch {}
+  await Sync.init(); render();
+  Outbox.flush();
+})();
+
+if ('serviceWorker' in navigator && location.protocol === 'https:') {
+  window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+}

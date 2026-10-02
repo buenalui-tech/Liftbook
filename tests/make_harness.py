@@ -8,9 +8,12 @@ import shutil
 
 OUT = '/tmp/lb_harness'
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-os.makedirs(OUT, exist_ok=True)
+shutil.rmtree(OUT, ignore_errors=True)
+os.makedirs(OUT)
 for f in ['manifest.webmanifest', 'icon-192.png', 'icon-512.png', 'apple-touch-icon.png', 'figure.glb']:
     shutil.copy(os.path.join(ROOT, f), OUT)
+for d in ['css', 'js']:
+    shutil.copytree(os.path.join(ROOT, d), os.path.join(OUT, d))
 shutil.copy(os.path.join(ROOT, 'tests', 'mock-supabase.js'), OUT)
 
 html = open(os.path.join(ROOT, 'index.html')).read()
@@ -19,8 +22,11 @@ html = html.replace('<script src="config.js"></script>',
 html = html.replace('<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.2/dist/umd/supabase.js"></script>',
                     '<script src="mock-supabase.js"></script>')
 assert 'mock-supabase.js' in html, 'Supabase script tag changed; update this script'
-# test-only handle on the 3D figure, for pinning its angle in screenshots
-html = html.replace('const Fig = {', 'const Fig = window.__fig = {', 1)
-html = html.replace('const Comp = {', 'const Comp = window.__comp = {', 1)
 open(os.path.join(OUT, 'index.html'), 'w').write(html)
+
+# test-only handles on the 3D figure, for pinning its angle in screenshots
+fig = os.path.join(OUT, 'js', 'figure.js')
+src = open(fig).read()
+src = src.replace('const Fig = {', 'const Fig = window.__fig = {', 1).replace('const Comp = {', 'const Comp = window.__comp = {', 1)
+open(fig, 'w').write(src)
 print('harness ready in', OUT)

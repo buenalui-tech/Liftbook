@@ -1,15 +1,17 @@
 // Offline support: the app shell is cached so Liftbook opens with no signal (gym basements).
 // Bump VERSION whenever index.html changes so phones pick up the new build.
-const VERSION = 'liftbook-v19';
+const VERSION = 'liftbook-v20';
 const SUPABASE_JS = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.2/dist/umd/supabase.js';
 const THREE_JS = 'https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js';
 const GLTF_JS = 'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js';
-const SHELL = ['./', './index.html', './config.js', SUPABASE_JS, THREE_JS, GLTF_JS, './figure.glb', './manifest.webmanifest', './icon-192.png', './icon-512.png', './apple-touch-icon.png'];
+const APP_FILES = ['css/app.css', 'js/core.js', 'js/training.js', 'js/ui.js', 'js/program.js', 'js/body.js', 'js/figure.js', 'js/share.js', 'js/tester.js', 'js/events.js'].map(f => './' + f);
+const SHELL = ['./', './index.html', './config.js', ...APP_FILES, SUPABASE_JS, THREE_JS, GLTF_JS, './figure.glb', './manifest.webmanifest', './icon-192.png', './icon-512.png', './apple-touch-icon.png'];
 
 self.addEventListener('install', e => {
   // cache each file on its own so one missing file doesn't block offline support
   e.waitUntil(caches.open(VERSION)
-    .then(c => Promise.all(SHELL.map(u => c.add(u).catch(() => {}))))
+    // cache: 'reload' skips the browser's HTTP cache so a new version never installs yesterday's files
+    .then(c => Promise.all(SHELL.map(u => c.add(new Request(u, {cache: 'reload'})).catch(() => {}))))
     .then(() => self.skipWaiting()));
 });
 
