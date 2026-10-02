@@ -354,5 +354,27 @@ textarea.note-in{width:100%;border:1px solid var(--line);border-radius:8px;backg
 .tg-macros b{font-family:var(--display);font-size:22px}
 .tg-macros small{color:var(--muted);font-size:12px}
 .scan-grid.three{grid-template-columns:repeat(3,minmax(0,1fr))}
+/* effort */
+.rpe{display:grid;grid-template-columns:repeat(10,1fr);gap:4px}
+.rpe button{min-height:40px;border:1px solid var(--line);background:var(--surface);border-radius:8px;font-family:var(--display);font-weight:700;font-size:17px;color:var(--ink);padding:0}
+.rpe button[aria-pressed="true"].r1{background:var(--good);border-color:var(--good);color:#fff}
+.rpe button[aria-pressed="true"].r2{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.rpe button[aria-pressed="true"].r3{background:var(--warn);border-color:var(--warn);color:#fff}
+.rpe button[aria-pressed="true"].r4{background:var(--pr);border-color:var(--pr);color:#fff}
+/* timer */
+.timer{min-height:calc(100vh - 40px);gap:16px}
+.tm-face{display:flex;flex-direction:column;align-items:center;text-align:center;gap:8px;padding:28px 16px;border-radius:20px;background:var(--surface);border:2px solid var(--line)}
+.timer.work .tm-face,.timer.open .tm-face,.timer.hold .tm-face{border-color:var(--accent);background:var(--accent-soft)}
+.timer.rest .tm-face{border-color:var(--good);background:var(--good-soft)}
+.timer.ready .tm-face{border-color:var(--warn);background:var(--warn-soft)}
+.tm-label{margin:0;font-family:var(--display);font-weight:700;font-size:30px;text-transform:uppercase;letter-spacing:.04em}
+.timer.work .tm-label,.timer.open .tm-label,.timer.hold .tm-label{color:var(--accent)} .timer.rest .tm-label{color:var(--good)} .timer.ready .tm-label{color:var(--warn)}
+.tm-big{font-family:var(--display);font-weight:700;font-size:min(30vw,128px);line-height:.95}
+.tm-sub{margin:0;font-size:20px;font-weight:600}
+.tm-round{margin:0;color:var(--muted);font-weight:600}
+.tm-track{width:100%;height:8px;border-radius:4px;background:rgba(127,127,127,.25);overflow:hidden}
+.tm-fill{height:100%;background:currentColor;width:0;color:var(--accent)}
+.tm-plus{min-height:84px;font-family:var(--display);font-size:30px;text-transform:uppercase;border-radius:18px}
+.tm-controls{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .toast{position:fixed;left:50%;transform:translateX(-50%);top:calc(12px + env(safe-area-inset-top,0px));z-index:20;background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:10px;font-weight:600;font-size:14px;max-width:calc(100% - 32px)}
 @media (prefers-reduced-motion: no-preference){.set.done{transition:background .2s}.rest .fill{transition:width .25s linear}}

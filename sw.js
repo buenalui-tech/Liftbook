@@ -1,10 +1,10 @@
 // Offline support: the app shell is cached so Liftbook opens with no signal (gym basements).
 // Bump VERSION whenever index.html changes so phones pick up the new build.
-const VERSION = 'liftbook-v25';
+const VERSION = 'liftbook-v26';
 const SUPABASE_JS = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.2/dist/umd/supabase.js';
 const THREE_JS = 'https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js';
 const GLTF_JS = 'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js';
-const APP_FILES = ['css/app.css', 'js/core.js', 'js/training.js', 'js/ui.js', 'js/program.js', 'js/body.js', 'js/food.js', 'js/adaptive.js', 'js/figure.js', 'js/share.js', 'js/tester.js', 'js/settings.js', 'js/events.js'].map(f => './' + f);
+const APP_FILES = ['css/app.css', 'js/core.js', 'js/training.js', 'js/ui.js', 'js/program.js', 'js/body.js', 'js/food.js', 'js/adaptive.js', 'js/figure.js', 'js/share.js', 'js/tester.js', 'js/settings.js', 'js/timer.js', 'js/events.js'].map(f => './' + f);
 const SHELL = ['./', './index.html', './config.js', ...APP_FILES, SUPABASE_JS, THREE_JS, GLTF_JS, './figure.glb', './manifest.webmanifest', './icon-192.png', './icon-512.png', './apple-touch-icon.png'];
 
 self.addEventListener('install', e => {

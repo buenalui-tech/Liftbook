@@ -12,6 +12,7 @@ function render() {
   try {
   if (S.screen === 'welcome') html = viewWelcome();
   else if (S.screen === 'settings') html = viewSettings();
+  else if (S.screen === 'timer' && S.timer) html = viewTimer();
   else if (S.screen === 'workout' && S.active) html = viewWorkout();
   else {
     html = `<div class="wrap">${
@@ -50,14 +51,37 @@ function storageBanner() {
   return '';
 }
 
-const ACTIVITIES = [['run', 'Run'], ['walk', 'Walk'], ['cycle', 'Cycle'], ['swim', 'Swim'], ['hike', 'Hike'], ['row', 'Row'],
-  ['sport', 'Sport'], ['yoga', 'Yoga'], ['hiit', 'HIIT'], ['other', 'Other']];
-const HAS_DISTANCE = new Set(['run', 'walk', 'cycle', 'swim', 'hike', 'row']);
+// gym machines first (most cardio happens there), then everything else; 'row' stays readable for older logs
+const MACHINES = [['treadmill', 'Treadmill'], ['spin', 'Indoor bike'], ['rower', 'Rower'], ['stairs', 'Stair climber'], ['elliptical', 'Elliptical']];
+const OUTSIDE = [['run', 'Run'], ['walk', 'Walk'], ['cycle', 'Cycle'], ['hike', 'Hike'], ['swim', 'Swim'], ['sport', 'Sport'], ['yoga', 'Yoga'], ['hiit', 'HIIT'], ['mobility', 'Mobility'], ['other', 'Other']];
+const ACTIVITIES = [...MACHINES, ...OUTSIDE, ['row', 'Row']];
+// the extra fields each type asks for (time, calories, heart rate and effort are always there)
+const ACT_FIELDS = {treadmill: ['distance', 'incline', 'speed'], spin: ['distance', 'level'], rower: ['meters'], stairs: ['level', 'floors'], elliptical: ['distance', 'level'],
+  run: ['distance'], walk: ['distance'], cycle: ['distance'], hike: ['distance'], swim: ['distance'], row: ['distance']};
+const HAS_DISTANCE = new Set(Object.keys(ACT_FIELDS).filter(k => ACT_FIELDS[k].includes('distance')));
+const speedUnit = () => unit() === 'kg' ? 'km/h' : 'mph';
+// effort: session RPE, 1–10
+const RPE_WORDS = ['', 'Very easy', 'Easy', 'Easy', 'Moderate', 'Moderate', 'Moderate', 'Hard', 'Hard', 'Very hard', 'Max effort'];
+function rpePicker(target, val) {
+  return `<div class="stack" style="gap:6px"><div class="row between"><span class="small"><b>How hard was it?</b></span><span class="small muted">${val ? `${val}/10 · ${RPE_WORDS[val]}` : 'Optional'}</span></div>
+    <div class="rpe" role="group" aria-label="Effort from 1 to 10">${[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(n => `<button data-act="rpe" data-t="${target}" data-v="${n}" aria-pressed="${val === n}" class="r${n <= 3 ? 1 : n <= 6 ? 2 : n <= 8 ? 3 : 4}">${n}</button>`).join('')}</div></div>`;
+}
+function actExtras(w) {
+  const t = w.type, out = [];
+  if (w.distance) out.push(`${fmtW(w.distance)} ${w.distUnit || distUnit()}`);
+  if (w.meters) { out.push(`${fmtNum(w.meters)} m`); const mins = ((w.endedAt || w.startedAt) - w.startedAt) / 60000; if (mins > 0) out.push(`${fmtDur(mins * 60 / (w.meters / 500))}/500 m`); }
+  if (w.speed && !w.distance) out.push(`${fmtW(w.speed)} ${w.speedUnit || speedUnit()}`);
+  if (w.incline) out.push(`${fmtW(w.incline)}% incline`);
+  if (w.level) out.push(`level ${fmtW(w.level)}`);
+  if (w.floors) out.push(`${fmtNum(w.floors)} floors`);
+  if (w.timer && w.timer.rounds) out.push(`${w.timer.rounds} ${w.timer.kind === 'mobility' ? 'stretch' : 'round'}${w.timer.rounds === 1 ? '' : (w.timer.kind === 'mobility' ? 'es' : 's')}`);
+  return out;
+}
 const isActivity = w => w.kind === 'activity';
 const distUnit = () => unit() === 'kg' ? 'km' : 'mi';
 function entrySummary(w) {
   const dur = fmtDur(((w.endedAt || w.startedAt) - w.startedAt) / 1000);
-  if (isActivity(w)) { const c = caloriesFor(w); return [dur, w.distance ? `${fmtW(w.distance)} ${w.distUnit || distUnit()}` : '', c ? `${kcalText(c)} kcal` : '', w.hr ? `${w.hr} bpm avg` : ''].filter(Boolean); }
+  if (isActivity(w)) { const c = caloriesFor(w); return [dur, ...actExtras(w).slice(0, 2), c ? `${kcalText(c)} kcal` : '', w.rpe ? `effort ${w.rpe}/10` : ''].filter(Boolean); }
   const c = caloriesFor(w), imp = improvements(w);
   return [dur, c ? `${kcalText(c)} kcal` : '', imp.compared ? `${imp.improved.size}/${imp.compared} improved` : ''].filter(Boolean);
 }
@@ -132,20 +156,33 @@ function viewLogSheet() {
   if (!sh.form) {
     const live = sh.day === today;
     return `<div class="row between"><h2>Log ${sh.day === today ? 'for today' : 'for ' + fmtDate(sh.day)}</h2><button class="iconbtn" data-act="sheet-close" aria-label="Close">✕</button></div>
-      <button class="hitem" data-act="log-activity"><h3>Activity</h3><span class="small muted">Run, walk, cycle, swim, sport, yoga and more. Time, distance, calories, heart rate.</span></button>
+      ${live ? `<button class="hitem" data-act="timer-setup"><h3>Interval timer</h3><span class="small muted">HIIT, Tabata, EMOM, AMRAP or for time. Saves to your log when you finish.</span></button>
+      <button class="hitem" data-act="mobility-setup"><h3>Mobility and stretching</h3><span class="small muted">Guided holds for warm-ups and cool-downs.</span></button>` : ''}
+      <button class="hitem" data-act="log-activity"><h3>Cardio or activity</h3><span class="small muted">Treadmill, bike, rower, stairs, runs, classes, sports. Time, distance, machine calories, effort.</span></button>
       <button class="hitem" data-act="log-strength"><h3>Custom strength workout</h3><span class="small muted">${live ? (S.active ? 'You already have a workout in progress. Finish it first.' : 'Start a live session and add any exercises as you go.') : 'Enter the exercises and sets you did that day.'}</span></button>`;
   }
   const f = sh.form, du = f.distUnit || distUnit();
   return `<div class="row between"><h2>${f.id ? 'Edit activity' : 'Log activity'}</h2><button class="iconbtn" data-act="sheet-close" aria-label="Close">✕</button></div>
-    <div class="chips" role="group" aria-label="Activity type">${ACTIVITIES.map(([k, l]) => `<button class="chipbtn" data-act="act-type" data-v="${k}" aria-pressed="${f.type === k}">${l}</button>`).join('')}</div>
+    <p class="eyebrow" style="margin:0">Gym machines</p>
+    <div class="chips" role="group" aria-label="Gym machines">${MACHINES.map(([k, l]) => `<button class="chipbtn" data-act="act-type" data-v="${k}" aria-pressed="${f.type === k}">${l}</button>`).join('')}</div>
+    <p class="eyebrow" style="margin:0">Other</p>
+    <div class="chips" role="group" aria-label="Other activities">${OUTSIDE.map(([k, l]) => `<button class="chipbtn" data-act="act-type" data-v="${k}" aria-pressed="${f.type === k}">${l}</button>`).join('')}</div>
     ${f.type === 'sport' || f.type === 'other' ? `<label class="field">Name<input id="act-name" data-in="act" data-f="name" value="${esc(f.name || '')}" placeholder="${f.type === 'sport' ? 'Basketball' : 'Stretching'}"></label>` : ''}
     <div class="row">
       <label class="field grow">Date<input id="act-date" type="date" data-in="act" data-f="dateStr" value="${f.dateStr}" max="${localISO(Date.now())}"></label>
       <label class="field grow">Duration (min)<input id="act-dur" data-in="act" data-f="dur" inputmode="numeric" value="${esc(f.dur || '')}" placeholder="30"></label>
     </div>
-    ${HAS_DISTANCE.has(f.type) ? `<label class="field">Distance (${du})<input id="act-dist" data-in="act" data-f="distance" inputmode="decimal" value="${esc(f.distance ?? '')}" placeholder="${f.type === 'cycle' ? '12' : '3.1'}"></label>` : ''}
+    ${(() => { const fl = ACT_FIELDS[f.type] || [], box = [];
+      if (fl.includes('distance')) box.push(`<label class="field grow">Distance (${du})<input id="act-dist" data-in="act" data-f="distance" inputmode="decimal" value="${esc(f.distance ?? '')}" placeholder="${f.type === 'cycle' || f.type === 'spin' ? '12' : '3.1'}"></label>`);
+      if (fl.includes('meters')) box.push(`<label class="field grow">Meters<input id="act-m" data-in="act" data-f="meters" inputmode="numeric" value="${esc(f.meters ?? '')}" placeholder="5000"></label>`);
+      if (fl.includes('speed')) box.push(`<label class="field grow">Speed (${speedUnit()})<input id="act-speed" data-in="act" data-f="speed" inputmode="decimal" value="${esc(f.speed ?? '')}" placeholder="${unit() === 'kg' ? '9' : '5.5'}"></label>`);
+      if (fl.includes('incline')) box.push(`<label class="field grow">Incline %<input id="act-inc" data-in="act" data-f="incline" inputmode="decimal" value="${esc(f.incline ?? '')}" placeholder="2"></label>`);
+      if (fl.includes('level')) box.push(`<label class="field grow">Level<input id="act-lvl" data-in="act" data-f="level" inputmode="numeric" value="${esc(f.level ?? '')}" placeholder="8"></label>`);
+      if (fl.includes('floors')) box.push(`<label class="field grow">Floors<input id="act-fl" data-in="act" data-f="floors" inputmode="numeric" value="${esc(f.floors ?? '')}" placeholder="60"></label>`);
+      return box.length ? `<div class="row" style="flex-wrap:wrap">${box.join('')}</div>` : ''; })()}
+    ${rpePicker('form', f.rpe)}
     <div class="row">
-      <label class="field grow">Calories (optional)<input id="act-cal" data-in="act" data-f="calories" inputmode="numeric" value="${esc(f.calories ?? '')}"></label>
+      <label class="field grow">${MACHINES.some(m => m[0] === f.type) ? 'Calories on the machine' : 'Calories'} (optional)<input id="act-cal" data-in="act" data-f="calories" inputmode="numeric" value="${esc(f.calories ?? '')}" placeholder="Leave blank to estimate"></label>
       <label class="field grow">Avg heart rate (optional)<input id="act-hr" data-in="act" data-f="hr" inputmode="numeric" value="${esc(f.hr ?? '')}"></label>
     </div>
     <label class="field">Notes (optional)<input id="act-notes" data-in="act" data-f="notes" value="${esc(f.notes || '')}" placeholder="Easy zone 2, felt good"></label>
@@ -155,15 +192,17 @@ function viewLogSheet() {
 }
 function activityForm(day, w) {
   if (w) return {id: w.id, type: w.type, name: w.type === 'sport' || w.type === 'other' ? w.routineName : '', dateStr: localISO(w.startedAt),
-    dur: String(Math.round((w.endedAt - w.startedAt) / 60000)), distance: w.distance ?? '', distUnit: w.distUnit, calories: w.calories ?? '', hr: w.hr ?? '', notes: w.notes || ''};
-  return {type: 'run', dateStr: localISO(day), dur: '', distance: '', calories: '', hr: '', notes: ''};
+    dur: String(Math.round((w.endedAt - w.startedAt) / 60000)), distance: w.distance ?? '', distUnit: w.distUnit, calories: w.calories ?? '', hr: w.hr ?? '', notes: w.notes || '',
+    meters: w.meters ?? '', speed: w.speed ?? '', incline: w.incline ?? '', level: w.level ?? '', floors: w.floors ?? '', rpe: w.rpe || null, timer: w.timer || null};
+  return {type: 'treadmill', dateStr: localISO(day), dur: '', distance: '', calories: '', hr: '', notes: '', rpe: null};
 }
 function saveActivity() {
   const f = S.sheet.form, num = v => { const n = parseFloat(String(v ?? '').replace(',', '.')); return isNaN(n) ? null : n; };
   const dur = num(f.dur);
   if (!(dur > 0 && dur < 1440)) { f.msg = 'Enter how many minutes it took, like 45.'; render(); return; }
-  const dist = HAS_DISTANCE.has(f.type) ? num(f.distance) : null, cal = num(f.calories), hr = num(f.hr);
-  if ([dist, cal, hr].some(v => v != null && v < 0)) { f.msg = 'Numbers can’t be negative.'; render(); return; }
+  const fl = ACT_FIELDS[f.type] || [], pick = k => fl.includes(k) ? num(f[k]) : null;
+  const dist = pick('distance'), cal = num(f.calories), hr = num(f.hr), extra = {meters: pick('meters'), speed: pick('speed'), incline: pick('incline'), level: pick('level'), floors: pick('floors')};
+  if ([dist, cal, hr, ...Object.values(extra)].some(v => v != null && v < 0)) { f.msg = 'Numbers can’t be negative.'; render(); return; }
   const label = (ACTIVITIES.find(a => a[0] === f.type) || [, 'Activity'])[1];
   const day = f.dateStr ? fromISO(f.dateStr) : startOfDay(Date.now());
   const existing = f.id ? S.workouts.find(w => w.id === f.id) : null;
@@ -172,7 +211,8 @@ function saveActivity() {
     : (day === startOfDay(Date.now()) ? Date.now() - dur * 60000 : day + 12 * 3600000);
   const w = existing || {id: newId(), kind: 'activity', exercises: [], unit: unit()};
   Object.assign(w, {type: f.type, routineName: (f.type === 'sport' || f.type === 'other') && f.name.trim() ? f.name.trim() : label,
-    startedAt, endedAt: startedAt + dur * 60000, distance: dist, distUnit: f.distUnit || distUnit(), calories: cal, hr: hr ? Math.round(hr) : null, notes: f.notes.trim()});
+    startedAt, endedAt: startedAt + dur * 60000, distance: dist, distUnit: f.distUnit || distUnit(), calories: cal, hr: hr ? Math.round(hr) : null, notes: f.notes.trim(),
+    ...extra, speedUnit: speedUnit(), rpe: f.rpe || null, ...(f.timer ? {timer: f.timer} : {})});
   if (!existing) S.workouts.push(w);
   S.workouts.sort((a, b) => b.startedAt - a.startedAt);
   store.saveWorkout(w);
@@ -205,6 +245,7 @@ function viewEditWorkout() {
       <label class="field grow">Date<input id="ed-date" data-in="ed-date" type="date" value="${d.dateStr}" max="${localISO(Date.now())}"></label>
       <label class="field grow">Duration (min)<input id="ed-dur" data-in="ed-dur" inputmode="numeric" value="${d.durMin}"></label>
     </div>
+    ${rpePicker('edit', d.rpe)}
     <label class="field">Calories from your watch (optional)<input id="ed-cal" data-in="ed-cal" inputmode="numeric" value="${d.calories ?? ''}" placeholder="Leave blank to estimate"></label>
     ${exs || '<p class="small muted">No exercises. Add one below, or delete this workout instead.</p>'}
     <div class="row"><label class="field grow">Add an exercise<select id="ed-add-sel">${lib.map(x => `<option value="${esc(x.id)}">${esc(x.name)}</option>`).join('')}</select></label>
@@ -236,7 +277,7 @@ function saveEditor() {
   if (!(dur > 0 && dur < 600)) { d.msg = 'Enter a duration in minutes, like 55.'; render(); return; }
   const day = d.dateStr ? fromISO(d.dateStr) : startOfDay(w.startedAt);
   const startedAt = day + (w.startedAt - startOfDay(w.startedAt));   // keep the original time of day
-  Object.assign(w, {exercises, startedAt, endedAt: startedAt + dur * 60000, calories: d.calories > 0 ? d.calories : null, note: (d.note || '').trim()});
+  Object.assign(w, {exercises, startedAt, endedAt: startedAt + dur * 60000, calories: d.calories > 0 ? d.calories : null, note: (d.note || '').trim(), rpe: d.rpe || null});
   if (d.isNew) { w.routineName = (d.routineName || '').trim() || 'Custom workout'; S.workouts.push(w); }
   S.workouts.sort((a, b) => b.startedAt - a.startedAt);
   store.saveWorkout(w);
@@ -336,6 +377,7 @@ function viewSheet() {
     const a = S.active, done = a.exercises.reduce((n, e) => n + e.sets.filter(s => s.done).length, 0), total = a.exercises.reduce((n, e) => n + e.sets.length, 0);
     body = `<h2>Finish ${esc(a.routineName)}?</h2>
       <p class="muted">${done} of ${total} sets completed in ${fmtDur((Date.now() - a.startedAt) / 1000)}. Unchecked sets won't be saved.</p>
+      ${rpePicker('active', a.rpe)}
       <button class="btn primary lg block" data-act="finish" ${done ? '' : 'disabled'}>Save workout</button>
       <button class="btn block" data-act="sheet-close">Keep training</button>
       <button class="btn danger block ${S.armed === 'discard' ? 'armed' : ''}" data-act="discard">${S.armed === 'discard' ? 'Tap again to discard' : 'Discard workout'}</button>`;
@@ -353,6 +395,10 @@ function viewSheet() {
     body = viewScanSheet();
   } else if (S.sheet.type === 'detail' && S.sheet.edit) {
     body = viewEditWorkout();
+  } else if (S.sheet.type === 'timer-setup') {
+    body = viewTimerSetup();
+  } else if (S.sheet.type === 'mobility-setup') {
+    body = viewMobilitySetup();
   } else if (S.sheet.type === 'add-food') {
     body = viewAddFood();
   } else if (S.sheet.type === 'portion') {
@@ -383,6 +429,7 @@ function viewSheet() {
         w.distance && HAS_DISTANCE.has(w.type) && w.type !== 'cycle' && w.type !== 'swim' ? ['Pace', `${fmtDur((w.endedAt - w.startedAt) / 1000 / w.distance)}/${w.distUnit}`] : null,
         w.calories ? ['Calories', fmtNum(w.calories)] : null, w.hr ? ['Avg HR', `${w.hr} bpm`] : null].filter(Boolean).slice(0, 3)
         .map(([k, v]) => `<div class="stat"><b class="num">${esc(v)}</b><span>${k}</span></div>`).join('')}</div>
+      ${actExtras(w).length || w.rpe ? `<p class="small muted" style="margin:0">${esc([...actExtras(w), w.rpe ? `effort ${w.rpe}/10 (${RPE_WORDS[w.rpe].toLowerCase()})` : ''].filter(Boolean).join(' · '))}</p>` : ''}
       ${w.notes ? `<p style="margin:0">${esc(w.notes)}</p>` : ''}
       <button class="btn block" data-act="act-edit" data-v="${esc(w.id)}">Edit activity</button>
       <button class="btn danger block ${S.armed === 'del' + w.id ? 'armed' : ''}" data-act="del-workout" data-v="${esc(w.id)}">${S.armed === 'del' + w.id ? 'Tap again to delete' : 'Delete activity'}</button>`;
@@ -428,6 +475,7 @@ function viewProgress() {
       : `<div class="empty">Log a workout and your estimated one-rep max for each lift is charted here.</div>`}
     </section>
     <section class="card"><div class="stack"><h3>Sets per muscle, last 7 days</h3><span class="small muted">The green band marks 10–20 hard sets a week, a common range for growth.</span></div>${bars}</section>
+    ${viewTrainingLoad()}
     ${viewNutritionProgress()}
     ${viewAllWorkouts()}`;
 }
@@ -455,6 +503,36 @@ function viewCalendar() {
     <div class="cal">${cells}</div>
     <div class="legend small muted"><span><b class="dot s"></b>Lifting</span><span><b class="dot a"></b>Activity</span></div>
     ${sel ? `<div class="stack" style="gap:8px"><p class="eyebrow" style="margin:0">${fmtDate(sel)}</p>${entries.length ? `<div class="hist">${entries.map(entryCard).join('')}</div>` : '<p class="small muted" style="margin:0">Rest day.</p>'}</div>` : '<p class="small muted" style="margin:0">Tap a day to see what you logged.</p>'}
+  </section>`;
+}
+/* training load = effort (1–10) × minutes, per week (the session-RPE method) */
+function sessionLoad(w) { const mins = ((w.endedAt || w.startedAt) - w.startedAt) / 60000; return w.rpe && mins > 0 ? w.rpe * mins : 0; }
+function viewTrainingLoad() {
+  const wk0 = startOfWeek(Date.now()), weeks = [];
+  for (let i = 7; i >= 0; i--) {
+    const start = wk0 - i * 7 * DAY, list = S.workouts.filter(w => w.startedAt >= start && w.startedAt < start + 7 * DAY);
+    const lift = list.filter(w => !isActivity(w)), other = list.filter(isActivity);
+    weeks.push({start, lift: lift.reduce((s, w) => s + sessionLoad(w), 0), other: other.reduce((s, w) => s + sessionLoad(w), 0), rated: list.filter(w => w.rpe).length, sessions: list.length,
+      cardioMin: other.reduce((s, w) => s + ((w.endedAt || w.startedAt) - w.startedAt) / 60000, 0)});
+  }
+  const rated = weeks.reduce((s, w) => s + w.rated, 0), all = weeks.reduce((s, w) => s + w.sessions, 0);
+  if (!rated) return `<section class="card"><h3>Training load</h3><p class="small muted" style="margin:0">Rate how hard each session was (1–10) when you finish it, and your weekly training load shows up here: effort × minutes, for lifting and everything else.</p></section>`;
+  const cur = weeks[7], prev4 = weeks.slice(3, 7), avg = prev4.reduce((s, w) => s + w.lift + w.other, 0) / 4;
+  const total = cur.lift + cur.other, ratio = avg ? total / avg : null;
+  const W = 320, H = 130, L = 8, R = 8, T = 10, B = 20, max = Math.max(...weeks.map(w => w.lift + w.other), 1), bw = (W - L - R) / 8;
+  const y = v => T + (1 - v / max) * (H - T - B);
+  const bars = weeks.map((w, i) => { const x = L + i * bw + 3, lh = H - B - y(w.lift), oh = H - B - y(w.other);
+    return `${w.lift ? `<rect x="${x}" y="${y(w.lift)}" width="${bw - 6}" height="${lh}" rx="2" fill="var(--accent)"/>` : ''}${w.other ? `<rect x="${x}" y="${y(w.lift) - oh}" width="${bw - 6}" height="${oh}" rx="2" fill="var(--good)"/>` : ''}
+      <text x="${x + (bw - 6) / 2}" y="${H - 6}" text-anchor="middle">${new Date(w.start).toLocaleDateString(undefined, {month: 'numeric', day: 'numeric'})}</text>`; }).join('');
+  const msg = ratio == null ? '' : ratio > 1.3 ? `This week is ${Math.round((ratio - 1) * 100)}% above your 4-week average. Big jumps are worth easing into.`
+    : ratio < 0.7 ? `This week is ${Math.round((1 - ratio) * 100)}% below your 4-week average${cur.start === wk0 ? ' so far' : ''}.` : 'This week is in line with your 4-week average.';
+  return `<section class="card"><div class="stack" style="gap:2px"><h3>Training load</h3><span class="small muted">Effort × minutes, last 8 weeks</span></div>
+    <div class="stats"><div class="stat"><b class="num">${fmtNum(total)}</b><span>This week</span></div><div class="stat"><b class="num">${fmtNum(avg)}</b><span>4-week avg</span></div>
+      <div class="stat"><b class="num">${fmtNum(cur.cardioMin)}</b><span>Cardio min</span></div></div>
+    <div class="chart"><svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Weekly training load">${bars}</svg></div>
+    <div class="legend small muted"><span><i style="background:var(--accent)"></i>Lifting</span><span><i style="background:var(--good)"></i>Cardio and other</span></div>
+    ${msg ? `<p class="small muted" style="margin:0">${msg}</p>` : ''}
+    ${rated < all ? `<p class="small muted" style="margin:0">${all - rated} of ${all} sessions have no effort rating, so they aren’t counted.</p>` : ''}
   </section>`;
 }
 function viewAllWorkouts() {

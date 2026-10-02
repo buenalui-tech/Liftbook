@@ -63,6 +63,31 @@ const A = {
   },
   'dismiss-summary': () => { S.summary = null; render(); },
   'sync-now': () => Sync.run(true),
+  rpe: d => {
+    const n = +d.v, set = o => { o.rpe = o.rpe === n ? null : n; };
+    if (d.t === 'active' && S.active) { set(S.active); saveActiveSoon(); }
+    else if (d.t === 'form' && S.sheet && S.sheet.form) set(S.sheet.form);
+    else if (d.t === 'edit' && S.sheet && S.sheet.edit) set(S.sheet.edit);
+    else if (d.t === 'timer' && S.timer && S.timer.done) set(S.timer.done);
+    render();
+  },
+  'timer-setup': () => { if (S.timer) { S.screen = 'timer'; render(); return; } S.sheet = {type: 'timer-setup', kind: 'intervals', vals: {work: 20, rest: 10, rounds: 8, minutes: 12, cap: 0, exText: ''}}; render(); },
+  'mobility-setup': () => { if (S.timer) { S.screen = 'timer'; render(); return; } S.sheet = {type: 'mobility-setup', hold: 0}; render(); },
+  'ts-kind': d => { S.sheet.kind = d.v; render(); },
+  'ts-preset': d => { Object.assign(S.sheet.vals, JSON.parse(d.v)); render(); },
+  'ts-recent': d => { const r = (S.profile.recentTimers || []).filter(x => x.kind !== 'mobility')[+d.v]; if (r) Timer.start(r); },
+  'ts-start': () => { const spec = timerSpecFromSheet(); if (spec.err) { toast(spec.err); return; } Timer.start(spec); },
+  'mob-hold': d => { S.sheet.hold = +d.v; render(); },
+  'mob-start': d => { const r = MOBILITY[d.v]; if (r) Timer.start({kind: 'mobility', name: r.name, items: r.items, hold: S.sheet.hold || 0}); },
+  'tm-pause': () => Timer.pause(),
+  'tm-resume': () => Timer.resume(),
+  'tm-skip': () => Timer.skip(),
+  'tm-round': () => Timer.round(),
+  'tm-finish': () => Timer.finish(true),
+  'tm-end': () => Timer.finish(false),
+  'tm-rounds': d => { const dn = S.timer.done; dn.rounds = Math.max(0, dn.rounds + (+d.v)); render(); },
+  'tm-save': () => Timer.save(),
+  'tm-discard': () => { if (!arm('tmdiscard')) return; disarm(); Timer.discard(); },
   'settings-open': () => { S.screen = 'settings'; S.sheet = null; render(); window.scrollTo(0, 0); },
   'settings-close': () => { S.screen = S.active && S.wasInWorkout ? 'workout' : 'tabs'; render(); window.scrollTo(0, 0); },
   'set-theme': d => { setSetting('theme', d.v); render(); },
@@ -228,6 +253,9 @@ document.addEventListener('input', ev => {
   } else if (k === 'ed-date') { S.sheet.edit.dateStr = el.value;
   } else if (k === 'ed-name') { S.sheet.edit.routineName = el.value;
   } else if (k === 'fb-msg') { S.sheet.msg = el.value;
+  } else if (k === 'ts') { const n = parseInt(el.value, 10); S.sheet.vals[el.dataset.k] = isNaN(n) ? null : n;
+  } else if (k === 'ts-ex') { S.sheet.vals.exText = el.value;
+  } else if (k === 'tm-notes') { if (S.timer && S.timer.done) S.timer.done.notes = el.value;
   } else if (k === 'tg-kcal' || k === 'tg-pct' || k === 'tg-gram') {
     const dr = S.sheet.draft, n = parseInt(el.value, 10);
     if (k === 'tg-kcal') dr.kcal = n > 0 ? n : null;

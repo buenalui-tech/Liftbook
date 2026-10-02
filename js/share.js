@@ -9,7 +9,10 @@ const SHARE_THEME = {
 // Did each exercise beat the previous session of it? Weighted: estimated max; bodyweight: reps; timed: seconds.
 /* Calories: a number from your watch wins; otherwise an estimate = MET × body weight (kg) × hours,
    using the Compendium of Physical Activities / ACSM equations. Lifting estimates are rough (±30%+). */
-const ACTIVITY_MET = {run: 9.8, walk: 3.5, cycle: 7.5, swim: 7.0, hike: 6.0, row: 7.0, sport: 7.0, yoga: 2.5, hiit: 8.0, other: 5.0};
+const ACTIVITY_MET = {run: 9.8, walk: 3.5, cycle: 7.5, swim: 7.0, hike: 6.0, row: 7.0, sport: 7.0, yoga: 2.5, hiit: 8.0, other: 5.0,
+  treadmill: 7.0, spin: 7.0, rower: 7.0, stairs: 9.0, elliptical: 5.0, mobility: 2.3};   // Compendium of Physical Activities
+// effort scales the table value: 5/10 is the table, 1/10 about 0.7×, 10/10 about 1.4×
+const effortFactor = rpe => rpe ? 0.6 + 0.08 * rpe : 1;
 const STRENGTH_MET = 5.0;   // resistance training, moderate to vigorous
 function bodyWeightKgAt(t) {
   const pts = weightSeries(); if (!pts.length) return null;
@@ -20,13 +23,17 @@ function caloriesFor(w) {
   if (w.calories > 0) return {kcal: Math.round(w.calories), est: false};
   const kg = bodyWeightKgAt(w.startedAt), hours = ((w.endedAt || w.startedAt) - w.startedAt) / 3600000;
   if (!kg || !(hours > 0)) return null;
-  let met = STRENGTH_MET;
+  let met = STRENGTH_MET * effortFactor(w.rpe);
   if (isActivity(w)) {
-    met = ACTIVITY_MET[w.type] || 5;
-    if ((w.type === 'run' || w.type === 'walk') && w.distance > 0) {
-      // ACSM: metres per minute → oxygen cost → METs (only where the equation holds)
-      const mpm = w.distance * (w.distUnit === 'km' ? 1000 : 1609.34) / (hours * 60);
-      const vo2 = w.type === 'run' && mpm > 134 ? 0.2 * mpm + 3.5 : w.type === 'walk' && mpm >= 50 && mpm <= 100 ? 0.1 * mpm + 3.5 : null;
+    met = (ACTIVITY_MET[w.type] || 5) * effortFactor(w.rpe);
+    // ACSM walking/running equations, incline included, where pace is known (metres per minute)
+    const mpm = w.speed > 0 ? w.speed * (w.speedUnit === 'km/h' ? 1000 : 1609.34) / 60
+      : w.distance > 0 ? w.distance * (w.distUnit === 'km' ? 1000 : 1609.34) / (hours * 60) : 0;
+    const grade = (w.incline || 0) / 100;
+    if (mpm && (w.type === 'run' || w.type === 'walk' || w.type === 'treadmill')) {
+      const running = w.type === 'run' || (w.type === 'treadmill' && mpm > 107);   // above ~4 mph counts as running
+      const vo2 = running ? (mpm > 134 || w.type === 'treadmill' ? 0.2 * mpm + 0.9 * mpm * grade + 3.5 : null)
+        : (mpm >= 50 && mpm <= 107 ? 0.1 * mpm + 1.8 * mpm * grade + 3.5 : null);
       if (vo2) met = vo2 / 3.5;
     }
   }

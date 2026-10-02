@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 
-const FILES = ['core', 'training', 'ui', 'program', 'body', 'food', 'adaptive', 'figure', 'share', 'tester', 'settings', 'events'];
+const FILES = ['core', 'training', 'ui', 'program', 'body', 'food', 'adaptive', 'figure', 'share', 'tester', 'settings', 'timer', 'events'];
 const DAY = 86400000;
 
 function loadApp(stored = {}) {
@@ -27,7 +27,7 @@ function loadApp(stored = {}) {
   vm.createContext(ctx);
   // top-level const/let live in the context's script scope; expose the names tests need
   const src = FILES.map(f => fs.readFileSync(new URL(`../js/${f}.js`, import.meta.url), 'utf8')).join('\n;\n') +
-    '\n;globalThis.T = {S, store, suggest, e1rm, niceTicks, weightSeries, weeklyRateKg, caloriesFor, improvements, recomputePRs, muscleLoad, musclesFor, tagFor, lastPerf, scanKg, conv, TEMPLATE, CATALOG, slug, startOfDay, fromUsda, fromOff, rankFoods, unitsFor, portionTotals, autoTargets, dayTotals, estimateBurn, targets, targetsFromBurn, computeTargets, nutritionPrefs, proposeTargets, applyCheckin, runAutoCheckin, checkinDue, copyMeal, foodLogs, viewToday, viewFood, viewProgress, viewBody, viewProgram, viewSheet, viewWorkout, startWorkout, viewSettings, TEMPLATE_COPY: () => JSON.parse(JSON.stringify(TEMPLATE))};';
+    '\n;globalThis.T = {S, store, suggest, e1rm, niceTicks, weightSeries, weeklyRateKg, caloriesFor, improvements, recomputePRs, muscleLoad, musclesFor, tagFor, lastPerf, scanKg, conv, TEMPLATE, CATALOG, slug, startOfDay, fromUsda, fromOff, rankFoods, unitsFor, portionTotals, autoTargets, dayTotals, estimateBurn, targets, targetsFromBurn, computeTargets, nutritionPrefs, proposeTargets, applyCheckin, runAutoCheckin, checkinDue, copyMeal, foodLogs, viewToday, viewFood, viewProgress, viewBody, viewProgram, viewSheet, viewWorkout, startWorkout, viewSettings, buildPhases, Timer, viewTimer, viewTimerSetup, viewMobilitySetup, MOBILITY, viewTrainingLoad, sessionLoad, caloriesFor, TEMPLATE_COPY: () => JSON.parse(JSON.stringify(TEMPLATE))};';
   vm.runInContext(src, ctx, {filename: 'liftbook.js'});
   return ctx.T;
 }
@@ -275,7 +275,7 @@ test('every tab and the main sheets draw without errors, empty and with data', (
   // sheets reached from those tabs
   for (const sheet of [{type: 'add-food', meal: 'lunch', mode: 'search'}, {type: 'add-food', meal: 'lunch', mode: 'recent'}, {type: 'add-food', meal: 'lunch', mode: 'mine'},
     {type: 'add-food', meal: 'lunch', mode: 'quick'}, {type: 'custom-food', meal: 'lunch'}, {type: 'barcode', meal: 'lunch'}, {type: 'targets'}, {type: 'targets', draft: {kcalMode: 'manual', kcal: 2400, split: 'percent', pct: {p: 40, f: 30}}}, {type: 'targets', draft: {kcalMode: 'auto', split: 'grams', grams: {p: 180, c: 250, f: 70}, pct: {p: 30, f: 30}}}, {type: 'save-meal', meal: 'lunch'},
-    {type: 'detail', id: 'a'}, {type: 'log', day: T.startOfDay(Date.now())}, {type: 'scan'}, {type: 'feedback', kind: 'bug'}]) {
+    {type: 'detail', id: 'a'}, {type: 'detail', id: 'r'}, {type: 'log', day: T.startOfDay(Date.now())}, {type: 'log', day: T.startOfDay(Date.now()), form: {type: 'treadmill', dateStr: '2026-10-01', rpe: 6}}, {type: 'log', day: T.startOfDay(Date.now()), form: {type: 'rower', dateStr: '2026-10-01'}}, {type: 'timer-setup', kind: 'emom', vals: {minutes: 12}}, {type: 'mobility-setup', hold: 0}, {type: 'scan'}, {type: 'feedback', kind: 'bug'}]) {
     T.S.sheet = sheet;
     assert.doesNotThrow(() => T.viewSheet(), `sheet ${sheet.type}${sheet.mode ? '/' + sheet.mode : ''}`);
   }
@@ -283,6 +283,9 @@ test('every tab and the main sheets draw without errors, empty and with data', (
   // and the live workout screen
   T.startWorkout('upper-a');
   assert.doesNotThrow(() => T.viewWorkout(), 'live workout');
+  T.S.workouts[0].rpe = 7; assert.doesNotThrow(() => T.viewTrainingLoad(), 'training load');
+  T.Timer.start({kind: 'amrap', minutes: 10, exercises: ['5 pull-ups']}); assert.doesNotThrow(() => T.viewTimer(), 'timer screen');
+  T.Timer.finish(true); assert.doesNotThrow(() => T.viewTimer(), 'timer summary');
 });
 
 test('targets: percentages always total 100, grams set the calories, legacy custom targets still load', () => {
@@ -337,4 +340,43 @@ test('check-in: automatic mode applies once a week and can be undone', () => {
   T.runAutoCheckin();
   assert.equal(T.targets().kcal, 2650, 'only once a week');
   assert.equal(T.S.profile.autoCheckin.from, 2400);
+});
+
+test('timer: phases for each format', () => {
+  const T = loadApp();
+  const tabata = T.buildPhases({kind: 'intervals', work: 20, rest: 10, rounds: 8, exercises: ['Burpees', 'Squats']});
+  assert.equal(tabata.filter(p => p.kind === 'work').length, 8);
+  assert.equal(tabata.filter(p => p.kind === 'rest').length, 7, 'no rest after the last round');
+  assert.equal(tabata[1].sub, 'Burpees'); assert.equal(tabata[3].sub, 'Squats', 'exercises rotate');
+  assert.equal(tabata.reduce((s, p) => s + p.secs, 0), 10 + 8 * 20 + 7 * 10);
+  assert.equal(T.buildPhases({kind: 'emom', minutes: 12}).filter(p => p.secs === 60).length, 12);
+  const mob = T.buildPhases({kind: 'mobility', items: T.MOBILITY.hips.items, hold: 30});
+  assert.ok(mob.some(p => p.sub === 'Left side') && mob.some(p => p.sub === 'Right side'), 'both sides are timed');
+  assert.ok(mob.filter(p => p.kind === 'hold').every(p => p.secs === 30), 'hold length applies to every stretch');
+});
+
+test('timer: follows the clock, so a locked or throttled phone catches up instead of drifting', () => {
+  const T = loadApp();
+  T.Timer.start({kind: 'intervals', work: 20, rest: 10, rounds: 3, exercises: []});
+  const t = T.S.timer;
+  t.phaseStart -= (10 + 20 + 10 + 5) * 1000;     // pretend 45 s passed with no ticks at all
+  T.Timer.update();
+  assert.equal(t.phases[t.idx].kind, 'work'); assert.equal(t.phases[t.idx].round, 2, 'lands in round 2’s work interval');
+  T.Timer.finish(false);
+  assert.equal(T.S.timer.done.completed, false);
+  T.Timer.save();
+  const saved = T.S.workouts[0];
+  assert.equal(saved.type, 'hiit'); assert.equal(saved.timer.kind, 'intervals');
+});
+
+test('effort: scales calorie estimates and drives training load; treadmill incline costs more', () => {
+  const T = loadApp();
+  T.S.body = [{id: 'b', kind: 'weight', date: Date.now() - 10 * DAY, w: 180, unit: 'lb'}];
+  const base = {id: 'h', kind: 'activity', type: 'hiit', exercises: [], startedAt: Date.now() - 2 * DAY, endedAt: Date.now() - 2 * DAY + 30 * 60000};
+  const easy = T.caloriesFor({...base, rpe: 3}).kcal, hard = T.caloriesFor({...base, rpe: 9}).kcal;
+  assert.ok(hard > easy * 1.4, `hard (${hard}) should cost clearly more than easy (${easy})`);
+  assert.equal(T.sessionLoad({...base, rpe: 7}), 7 * 30);
+  const walk = {id: 't', kind: 'activity', type: 'treadmill', exercises: [], startedAt: 0, endedAt: 30 * 60000, speed: 3.5, speedUnit: 'mph'};
+  T.S.body[0].date = -DAY;
+  assert.ok(T.caloriesFor({...walk, incline: 10}).kcal > T.caloriesFor({...walk, incline: 0}).kcal * 1.6, 'a 10% incline walk costs much more than flat');
 });
