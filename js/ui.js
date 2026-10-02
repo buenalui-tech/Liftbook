@@ -355,6 +355,11 @@ function viewSheet() {
     body = viewScan();
   } else if (S.sheet.type === 'targets') {
     body = viewTargets();
+  } else if (S.sheet.type === 'save-meal') {
+    body = `<div class="row between"><h2>Save as a meal</h2><button class="iconbtn" data-act="sheet-close" aria-label="Close">✕</button></div>
+      <p class="small muted" style="margin:0">Saves these foods and amounts so you can add them all in one tap from My foods.</p>
+      <label class="field">Name<input id="sm-name" placeholder="Morning shake"></label>
+      <button class="btn primary block" data-act="meal-save">Save meal</button>`;
   } else if (S.sheet.type === 'feedback') {
     body = viewFeedbackSheet();
   } else if (S.sheet.type === 'pick') {
@@ -413,6 +418,7 @@ function viewProgress() {
       : `<div class="empty">Log a workout and your estimated one-rep max for each lift is charted here.</div>`}
     </section>
     <section class="card"><div class="stack"><h3>Sets per muscle, last 7 days</h3><span class="small muted">The green band marks 10–20 hard sets a week, a common range for growth.</span></div>${bars}</section>
+    ${viewNutritionProgress()}
     ${viewAllWorkouts()}`;
 }
 /* month calendar: blue dot = lifting, green dot = activity; tap a day to see what was logged */

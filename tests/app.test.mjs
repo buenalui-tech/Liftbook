@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 
-const FILES = ['core', 'training', 'ui', 'program', 'body', 'food', 'figure', 'share', 'tester', 'events'];
+const FILES = ['core', 'training', 'ui', 'program', 'body', 'food', 'adaptive', 'figure', 'share', 'tester', 'events'];
 const DAY = 86400000;
 
 function loadApp(stored = {}) {
@@ -21,13 +21,13 @@ function loadApp(stored = {}) {
     document, location: {protocol: 'file:', href: 'file:///'}, performance: {now: () => 0},
     navigator: {onLine: true, userAgent: 'node', maxTouchPoints: 0},
     localStorage: {getItem: k => store.has(k) ? store.get(k) : null, setItem: (k, v) => store.set(k, String(v)), removeItem: k => store.delete(k)},
-    matchMedia: () => ({matches: false}), addEventListener() {}, LIFTBOOK_CONFIG: {},
+    matchMedia: () => ({matches: false}), addEventListener() {}, scrollTo() {}, scrollBy() {}, LIFTBOOK_CONFIG: {},
   };
   ctx.window = ctx; ctx.self = ctx;
   vm.createContext(ctx);
   // top-level const/let live in the context's script scope; expose the names tests need
   const src = FILES.map(f => fs.readFileSync(new URL(`../js/${f}.js`, import.meta.url), 'utf8')).join('\n;\n') +
-    '\n;globalThis.T = {S, store, suggest, e1rm, niceTicks, weightSeries, weeklyRateKg, caloriesFor, improvements, recomputePRs, muscleLoad, musclesFor, tagFor, lastPerf, scanKg, conv, TEMPLATE, CATALOG, slug, startOfDay, fromUsda, fromOff, rankFoods, unitsFor, portionTotals, autoTargets, dayTotals};';
+    '\n;globalThis.T = {S, store, suggest, e1rm, niceTicks, weightSeries, weeklyRateKg, caloriesFor, improvements, recomputePRs, muscleLoad, musclesFor, tagFor, lastPerf, scanKg, conv, TEMPLATE, CATALOG, slug, startOfDay, fromUsda, fromOff, rankFoods, unitsFor, portionTotals, autoTargets, dayTotals, estimateBurn, targets, targetsFromBurn, copyMeal, foodLogs, viewToday, viewFood, viewProgress, viewBody, viewProgram, viewSheet, viewWorkout, startWorkout, TEMPLATE_COPY: () => JSON.parse(JSON.stringify(TEMPLATE))};';
   vm.runInContext(src, ctx, {filename: 'liftbook.js'});
   return ctx.T;
 }
@@ -194,4 +194,93 @@ test('food: targets come from the InBody BMR when there is one, and the goal mov
   assert.equal(t.kcal, 2200, '1 lb/week cut = −500 kcal/day');
   assert.equal(t.p, 180);
   assert.equal(t.c, Math.round((2200 - 180 * 4 - 70 * 9) / 4));
+});
+
+// a steady world: eat `kcal` every day, weight falls `lbPerWeek` from 200 lb, weighed every day
+function steadyWorld(T, {kcal, lbPerWeek, days = 35, skipFood = []}) {
+  const today = T.startOfDay(Date.now());
+  T.S.body = []; T.S.food = [];
+  for (let i = days; i >= 1; i--) {
+    const day = today - i * DAY;
+    T.S.body.push({id: 'w' + i, kind: 'weight', date: day + 7 * 3600000, w: 200 - (days - i) * lbPerWeek / 7, unit: 'lb'});
+    if (!skipFood.includes(i)) T.S.food.push({id: 'f' + i, kind: 'log', date: day + 12 * 3600000, meal: 'lunch', food: {key: 'quick:x', name: 'x', source: 'quick'}, qty: 1, totals: {kcal, p: 150, c: 250, f: 70, fiber: 20}});
+  }
+}
+
+test('adaptive: real burn = intake minus trend change (3,500 kcal per lb)', () => {
+  const T = loadApp();
+  steadyWorld(T, {kcal: 2500, lbPerWeek: 0.5});
+  const est = T.estimateBurn();
+  assert.equal(est.ready, true);
+  assert.ok(Math.abs(est.burn - 2750) <= 20, `expected about 2,750, got ${est.burn}`);
+  steadyWorld(T, {kcal: 3000, lbPerWeek: -0.5});   // gaining
+  assert.ok(Math.abs(T.estimateBurn().burn - 2750) <= 20);
+});
+
+test('adaptive: waits for enough data, and skips partly logged days', () => {
+  const T = loadApp();
+  steadyWorld(T, {kcal: 2500, lbPerWeek: 0.5, days: 8});
+  const early = T.estimateBurn();
+  assert.equal(early.ready, false);
+  assert.equal(early.progress.foodDays, 8);
+  // a 300 kcal day (forgot to log) is ignored; so is a day marked as incomplete
+  steadyWorld(T, {kcal: 2500, lbPerWeek: 0.5});
+  const today = T.startOfDay(Date.now());
+  T.S.food.find(x => x.id === 'f3').totals.kcal = 300;
+  T.S.food.find(x => x.id === 'f5').totals.kcal = 1200;
+  T.S.profile.incompleteDays = [today - 5 * DAY];
+  const est = T.estimateBurn();
+  assert.equal(est.foodDays, 19);
+  assert.ok(Math.abs(est.burn - 2750) <= 20, `partial days must not drag the estimate, got ${est.burn}`);
+});
+
+test('adaptive: an accepted burn drives targets, adjusted for the goal', () => {
+  const T = loadApp();
+  steadyWorld(T, {kcal: 2500, lbPerWeek: 0.5});
+  T.S.profile.goal = {type: 'cut', rate: 0.5};
+  T.S.profile.adaptive = {burn: 2750, at: Date.now(), week: 0};
+  assert.equal(T.targets().kcal, 2500, '2,750 burn − 250 for a 0.5 lb/week cut');
+  T.S.profile.nutrition = {mode: 'custom', kcal: 2000, p: 160, c: 200, f: 60};
+  assert.equal(T.targets().kcal, 2000, 'custom numbers always win');
+});
+
+test('food: copying yesterday’s meal makes new entries for today', () => {
+  const T = loadApp();
+  const today = T.startOfDay(Date.now());
+  T.S.food = [{id: 'a', kind: 'log', date: today - DAY + 9 * 3600000, meal: 'breakfast', food: {key: 'k', name: 'Oats'}, qty: 1, totals: {kcal: 300, p: 10, c: 50, f: 5, fiber: 8}}];
+  assert.equal(T.copyMeal(today - DAY, 'breakfast', today), 1);
+  const copied = T.foodLogs(today);
+  assert.equal(copied.length, 1);
+  assert.notEqual(copied[0].id, 'a');
+  assert.equal(T.dayTotals(today).kcal, 300);
+});
+
+test('every tab and the main sheets draw without errors, empty and with data', () => {
+  const T = loadApp();
+  const draw = label => {
+    for (const [name, fn] of [['Today', T.viewToday], ['Food', T.viewFood], ['Progress', T.viewProgress], ['Body', T.viewBody], ['Program', T.viewProgram]]) {
+      assert.doesNotThrow(() => { const html = fn(); assert.ok(html.length > 50); }, `${name} tab (${label})`);
+    }
+  };
+  draw('brand-new user');
+  // a well-used account: program, workouts, weigh-ins, a scan, food, an accepted learned burn
+  T.S.program = T.TEMPLATE_COPY();
+  steadyWorld(T, {kcal: 2500, lbPerWeek: 0.5});
+  T.S.workouts = [workout('a', 1, [bench([set(185, 8), set(185, 8)])]), {id: 'r', kind: 'activity', type: 'run', routineName: 'Run', unit: 'lb', exercises: [], startedAt: Date.now() - 2 * DAY, endedAt: Date.now() - 2 * DAY + 1800000, distance: 3, distUnit: 'mi'}];
+  T.S.body.push({id: 's', kind: 'scan', date: Date.now() - 3 * DAY, unit: 'lb', weight: 200, bfm: 50, pbf: 25, smm: 85, bmr: 1800, seg: {ra: {lean: 8.6, fat: 3.5}}});
+  T.S.profile.goal = {type: 'cut', rate: 0.5};
+  draw('with data');
+  T.S.profile.adaptive = {burn: 2750, at: Date.now(), week: 0};
+  draw('after accepting a learned burn');
+  // sheets reached from those tabs
+  for (const sheet of [{type: 'add-food', meal: 'lunch', mode: 'search'}, {type: 'add-food', meal: 'lunch', mode: 'recent'}, {type: 'add-food', meal: 'lunch', mode: 'mine'},
+    {type: 'add-food', meal: 'lunch', mode: 'quick'}, {type: 'custom-food', meal: 'lunch'}, {type: 'barcode', meal: 'lunch'}, {type: 'targets'}, {type: 'save-meal', meal: 'lunch'},
+    {type: 'detail', id: 'a'}, {type: 'log', day: T.startOfDay(Date.now())}, {type: 'scan'}, {type: 'feedback', kind: 'bug'}]) {
+    T.S.sheet = sheet;
+    assert.doesNotThrow(() => T.viewSheet(), `sheet ${sheet.type}${sheet.mode ? '/' + sheet.mode : ''}`);
+  }
+  T.S.sheet = null;
+  // and the live workout screen
+  T.startWorkout('upper-a');
+  assert.doesNotThrow(() => T.viewWorkout(), 'live workout');
 });

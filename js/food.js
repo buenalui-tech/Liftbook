@@ -128,6 +128,8 @@ function autoTargets() {
 function targets() {
   const n = S.profile.nutrition;
   if (n && n.mode === 'custom') return {...n, basis: 'your own numbers'};
+  const a = S.profile.adaptive;
+  if (a && a.burn) return targetsFromBurn(a.burn, `your real burn of ${fmtNum(a.burn)} kcal/day, learned from your logs (updated ${fmtDate(a.at)})`) || autoTargets();
   return autoTargets();
 }
 
@@ -148,6 +150,7 @@ function viewFood() {
   const today = startOfDay(Date.now()); if (!S.day || S.day > today) S.day = today;
   const day = S.day, tot = dayTotals(day), tg = targets();
   const left = tg ? tg.kcal - tot.kcal : null;
+  const due = day === today ? checkinDue() : null, partial = isIncompleteDay(day), yesterday = day - DAY;
   const meals = MEALS.map(([m, label]) => {
     const items = foodLogs(day).filter(x => x.meal === m).sort((a, b) => a.date - b.date);
     const kcal = items.reduce((s, x) => s + (x.totals.kcal || 0), 0);
@@ -155,9 +158,14 @@ function viewFood() {
       ${items.map(x => `<button class="food-row" data-act="food-edit" data-v="${esc(x.id)}">
         <span class="stack" style="gap:0;min-width:0"><span class="fname">${esc(x.food.name)}</span><span class="small muted">${esc([x.food.brand, x.qtyLabel].filter(Boolean).join(' · '))}</span></span>
         <span class="num fk"><b>${fmtNum(x.totals.kcal)}</b><span class="small muted">${Math.round(x.totals.p)}g P</span></span></button>`).join('')}
-      <button class="btn ghost" data-act="food-add" data-v="${m}" style="align-self:flex-start">+ Add food</button></section>`;
+      <div class="row" style="flex-wrap:wrap;gap:4px">
+        <button class="btn ghost" data-act="food-add" data-v="${m}">+ Add food</button>
+        ${!items.length && foodLogs(yesterday).some(x => x.meal === m) ? `<button class="btn ghost" data-act="meal-copy" data-v="${m}">Copy yesterday’s ${label.toLowerCase()}</button>` : ''}
+        ${items.length > 1 ? `<button class="btn ghost" data-act="meal-save-open" data-v="${m}" style="color:var(--muted)">Save as a meal</button>` : ''}
+      </div></section>`;
   }).join('');
   return `${brand('Food')}${storageBanner()}
+    ${due ? viewCheckin(due) : ''}
     ${foodDayNav()}
     <section class="card">
       ${tg ? `<div class="row between" style="align-items:flex-end"><div><b class="num kcal-big">${fmtNum(tot.kcal)}</b> <span class="muted">/ ${fmtNum(tg.kcal)} kcal</span></div>
@@ -167,6 +175,9 @@ function viewFood() {
            <p class="small muted" style="margin:0">Log a weigh-in on the Body tab and Liftbook sets calorie and protein targets for you.</p>`}
       ${macroBar('Protein', tot.p, tg && tg.p, 'g', 'p')}${macroBar('Carbs', tot.c, tg && tg.c, 'g', 'c')}${macroBar('Fat', tot.f, tg && tg.f, 'g', 'f')}
       <div class="row between small muted"><span>Fiber ${Math.round(tot.fiber)} g</span>${tg ? `<button class="btn ghost" data-act="targets-open" style="min-height:0;padding:0">Targets</button>` : ''}</div>
+      ${learningNote()}
+      <label class="row small partial-day"><input type="checkbox" data-act="day-incomplete" ${partial ? 'checked' : ''}> I didn’t log everything ${day === today ? 'today' : 'this day'}
+        <span class="muted">(left out when Liftbook learns your burn)</span></label>
     </section>
     ${meals}
     <p class="small muted">Food data: <a href="https://fdc.nal.usda.gov/" target="_blank" rel="noopener">USDA FoodData Central</a> and <a href="https://world.openfoodfacts.org/" target="_blank" rel="noopener">Open Food Facts</a> (ODbL).</p>
@@ -199,8 +210,14 @@ function viewAddFood() {
     body = rec.length ? `<div class="lib">${rec.map((x, i) => foodResult(x.food, i, x.last.qtyLabel)).join('')}</div>` : '<p class="small muted">Foods you log show up here for one-tap repeats.</p>';
   } else if (mode === 'mine') {
     const mine = S.food.filter(x => x.kind === 'food').sort((a, b) => a.name.localeCompare(b.name));
+    const meals = S.food.filter(x => x.kind === 'meal').sort((a, b) => a.name.localeCompare(b.name));
     sh.results = mine.map(customAsFood);
-    body = `${mine.length ? `<div class="lib">${sh.results.map((x, i) => foodResult(x, i)).join('')}</div>` : '<p class="small muted">Save foods and recipes the databases don’t have.</p>'}
+    body = `${meals.length ? `<p class="eyebrow" style="margin:0">Saved meals</p><div class="lib">${meals.map(m => `<div class="saved-meal">
+        <button data-act="saved-meal-log" data-v="${esc(m.id)}"><span class="stack" style="gap:1px;text-align:left"><span class="fname">${esc(m.name)}</span>
+          <span class="small muted">${m.items.length} items · ${fmtNum(mealKcal(m))} kcal</span></span><span class="src custom">Meal</span></button>
+        <button class="iconbtn" data-act="saved-meal-del" data-v="${esc(m.id)}" aria-label="Delete ${esc(m.name)}" style="${S.armed === 'smdel' + m.id ? 'color:var(--pr)' : ''}">${S.armed === 'smdel' + m.id ? '✓?' : '✕'}</button></div>`).join('')}</div>
+        <p class="eyebrow" style="margin:0">Foods</p>` : ''}
+      ${mine.length ? `<div class="lib">${sh.results.map((x, i) => foodResult(x, i)).join('')}</div>` : '<p class="small muted">Save foods and recipes the databases don’t have.</p>'}
       <button class="btn block" data-act="custom-new">+ Create a food</button>`;
   } else if (mode === 'quick') {
     body = `<p class="small muted" style="margin:0">For restaurant meals or anything you only know the numbers for.</p>
@@ -346,10 +363,10 @@ async function onBarcode(code) {
 
 /* ---------- targets sheet ---------- */
 function viewTargets() {
-  const a = autoTargets(), n = S.profile.nutrition || {mode: 'auto'}, custom = n.mode === 'custom', cur = custom ? n : a;
+  const a = autoTargets(), n = S.profile.nutrition || {mode: 'auto'}, custom = n.mode === 'custom', cur = custom ? n : (targets() || a);
   return `<div class="row between"><h2>Daily targets</h2><button class="iconbtn" data-act="sheet-close" aria-label="Close">✕</button></div>
     <div class="seg" role="group" aria-label="Target mode"><button data-act="targets-mode" data-v="auto" aria-pressed="${!custom}">Set for me</button><button data-act="targets-mode" data-v="custom" aria-pressed="${custom}">My own numbers</button></div>
-    ${!custom ? (a ? `<p class="small muted" style="margin:0">Based on ${esc(a.basis)}. Protein is 0.9 g per lb of body weight, fat 0.35 g per lb, and carbs fill the rest. Change Cut, Maintain or Bulk on the Body tab. Once you’ve logged food for a few weeks, these will adjust to how your weight actually responds.</p>`
+    ${!custom ? (a ? `<p class="small muted" style="margin:0">Based on ${esc((targets() || a).basis)}. Protein is 0.9 g per lb of body weight, fat 0.35 g per lb, and carbs fill the rest. Change Cut, Maintain or Bulk on the Body tab. ${S.profile.adaptive ? 'A weekly check-in on the Food tab offers updates as your data changes.' : 'After about 2 weeks of logging food and weight, Liftbook learns your real burn and offers updated targets in a weekly check-in.'}</p>`
       : '<p class="small muted" style="margin:0">Log a weigh-in on the Body tab first.</p>') : ''}
     <div class="scan-grid">
       ${[['kcal', 'Calories', ''], ['p', 'Protein', 'g'], ['c', 'Carbs', 'g'], ['f', 'Fat', 'g']].map(([k, l, u]) => `<label class="field">${l}${u ? ` (${u})` : ''}<input id="tg-${k}" inputmode="numeric" value="${cur ? cur[k] : ''}" ${custom ? '' : 'disabled'}></label>`).join('')}

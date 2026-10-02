@@ -80,6 +80,28 @@ const A = {
   'targets-open': () => { S.sheet = {type: 'targets'}; render(); },
   'targets-mode': d => { S.profile.nutrition = d.v === 'auto' ? {mode: 'auto'} : {...(targets() || {kcal: 2200, p: 150, c: 220, f: 70}), mode: 'custom'}; delete S.profile.nutrition.basis; store.saveProfile(); render(); },
   'targets-save': () => saveTargets(),
+  'checkin-accept': () => {
+    const est = estimateBurn(); if (!est.ready) return;
+    const now = Date.now(), hist = ((S.profile.adaptive && S.profile.adaptive.history) || []).slice(-25);
+    hist.push({at: now, burn: est.burn, intake: est.intake, kgPerWeek: est.kgPerWeek});
+    S.profile.adaptive = {burn: est.burn, at: now, week: startOfWeek(now), history: hist};
+    S.profile.nutrition = {mode: 'auto'}; store.saveProfile(); render(); toast(`Targets updated: ${fmtNum(targets().kcal)} kcal`);
+  },
+  'checkin-skip': () => { S.profile.checkinSkipped = startOfWeek(Date.now()); store.saveProfile(); render(); },
+  'day-incomplete': d => {
+    const day = S.day || startOfDay(Date.now()), cut = startOfDay(Date.now()) - 120 * DAY;
+    const list = (S.profile.incompleteDays || []).filter(x => x >= cut && x !== day);
+    if (!isIncompleteDay(day)) list.push(day);
+    S.profile.incompleteDays = list; store.saveProfile(); render();
+  },
+  'meal-copy': d => { const n = copyMeal(S.day - DAY, d.v, S.day); render(); toast(`Copied ${n} item${n === 1 ? '' : 's'}`); },
+  'meal-save-open': d => { S.sheet = {type: 'save-meal', meal: d.v}; render(); const i = document.getElementById('sm-name'); if (i) i.focus(); },
+  'meal-save': () => {
+    const name = (document.getElementById('sm-name').value || '').trim(); if (!name) { toast('Give the meal a name.'); return; }
+    saveMealAs(S.day || startOfDay(Date.now()), S.sheet.meal, name); S.sheet = null; render(); toast(`${name} saved`);
+  },
+  'saved-meal-log': d => { const m = S.food.find(x => x.id === d.v); if (!m) return; const meal = S.sheet.meal; logSavedMeal(m, meal, S.day || startOfDay(Date.now())); S.sheet = null; render(); toast(`${m.name} added to ${mealLabel(meal)}`); },
+  'saved-meal-del': d => { if (!arm('smdel' + d.v)) return; disarm(); S.food = S.food.filter(x => x.id !== d.v); store.deleteFood(d.v); render(); },
   'feedback-open': () => { S.sheet = {type: 'feedback', kind: 'bug', msg: '', from: currentScreen()}; render(); },
   'fb-kind': d => { S.sheet.kind = d.v; render(); },
   'fb-send': () => sendFeedback(),
