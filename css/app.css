@@ -322,5 +322,29 @@ input.search{height:44px;border:1px solid var(--line);border-radius:10px;backgro
 .saved-meal{display:flex;align-items:center;border-top:1px solid var(--line)}
 .saved-meal:first-child{border-top:0}
 .saved-meal > button:first-child{flex:1;border:0;background:transparent;padding:10px 12px;display:flex;justify-content:space-between;gap:8px;font:inherit;color:var(--ink);cursor:pointer}
+/* settings */
+.gear{width:34px;height:34px;color:var(--muted)}
+.gear svg{width:20px;height:20px}
+.set-row{display:flex;justify-content:space-between;align-items:center;gap:12px;padding-block:6px;border-top:1px solid var(--line)}
+.card > h3 + .set-row{border-top:0}
+.set-row.disabled{opacity:.5}
+.set-row input.mini{width:80px}
+.set-row .seg button{padding:7px 10px;font-size:14px}
+input.switch{appearance:none;-webkit-appearance:none;width:46px;height:28px;border-radius:14px;background:var(--line);position:relative;flex:none;cursor:pointer;transition:background .15s}
+input.switch::after{content:"";position:absolute;top:3px;left:3px;width:22px;height:22px;border-radius:50%;background:var(--surface);box-shadow:0 1px 3px rgba(0,0,0,.25);transition:left .15s}
+input.switch:checked{background:var(--accent)}
+input.switch:checked::after{left:21px}
+.swatches{display:flex;gap:10px}
+.swatch{width:30px;height:30px;border-radius:50%;border:0;background:var(--sw-l);cursor:pointer;box-shadow:0 0 0 2px var(--bg),0 0 0 3px transparent}
+.swatch.on{box-shadow:0 0 0 2px var(--surface),0 0 0 4px var(--ink)}
+:root[data-theme="dark"] .swatch{background:var(--sw-d)}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .swatch{background:var(--sw-d)}}
+/* notes */
+.iconbtn.has-note{color:var(--accent)}
+.cue{display:flex;gap:6px;align-items:flex-start;font-size:13px;font-weight:600;color:var(--accent)}
+.cue svg{flex:none;margin-top:2px}
+.prev-note{font-size:13px;border-left:3px solid var(--line);padding:2px 0 2px 8px;color:var(--muted);border-radius:0}
+.prev-note b{color:var(--ink);font-weight:600}
+textarea.note-in{width:100%;border:1px solid var(--line);border-radius:8px;background:var(--sunk);padding:8px 10px;font:inherit;font-size:15px;color:var(--ink);resize:vertical;min-height:44px}
 .toast{position:fixed;left:50%;transform:translateX(-50%);top:calc(12px + env(safe-area-inset-top,0px));z-index:20;background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:10px;font-weight:600;font-size:14px;max-width:calc(100% - 32px)}
 @media (prefers-reduced-motion: no-preference){.set.done{transition:background .2s}.rest .fill{transition:width .25s linear}}

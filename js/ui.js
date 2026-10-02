@@ -11,6 +11,7 @@ function render() {
   let html = '';
   try {
   if (S.screen === 'welcome') html = viewWelcome();
+  else if (S.screen === 'settings') html = viewSettings();
   else if (S.screen === 'workout' && S.active) html = viewWorkout();
   else {
     html = `<div class="wrap">${
@@ -27,7 +28,7 @@ function render() {
   }
   $app.innerHTML = html;
   for (const [id, v] of Object.entries(keep)) { const el = document.getElementById(id); if (el) el.value = v; }
-  if (focused) { const el = document.getElementById(focused); if (el && el.tagName === 'INPUT' && el.type !== 'range') el.focus({preventScroll: true}); }
+  if (focused) { const el = document.getElementById(focused); if (el && ((el.tagName === 'INPUT' && el.type !== 'range') || el.tagName === 'TEXTAREA')) { el.focus({preventScroll: true}); if (el.tagName === 'TEXTAREA') el.selectionStart = el.selectionEnd = el.value.length; } }
   shownScan = null;
   Fig.attach();
   // the camera lives outside the redraw: keep it in the scan sheet, stop it when the sheet goes
@@ -37,11 +38,11 @@ function viewTabs() {
   const t = (id, label, icon) => `<button data-act="tab" data-v="${id}" ${S.tab === id ? 'aria-current="page"' : ''}>${ICON[icon]}<span>${label}</span></button>`;
   return `<div class="tabs"><nav>${t('today','Today','today')}${t('food','Food','food')}${t('progress','Progress','prog')}${t('body','Body','body')}${t('program','Program','plan')}</nav></div>`;
 }
-function brand(sub) { return `<div class="brand"><h1>Lift<span>book</span></h1><div class="row" style="gap:8px">${syncPill()}<small>${sub || ''}</small></div></div>`; }
+function brand(sub) { return `<div class="brand"><h1>Lift<span>book</span></h1><div class="row" style="gap:6px">${syncPill()}<small>${sub || ''}</small><button class="iconbtn gear" data-act="settings-open" aria-label="Settings">${ICON_GEAR}</button></div></div>`; }
 const IN_CLAUDE = !!(window.claude && typeof window.claude.use === 'function');
 function storageBanner() {
   if (Sync.user) return '';
-  if (Sync.client && S.workouts.length) return `<div class="banner row between"><span>Your log is only on this phone. Sign in to back it up automatically.</span><button class="btn" data-act="tab" data-v="program" style="min-height:36px">Sign in</button></div>`;
+  if (Sync.client && S.workouts.length) return `<div class="banner row between"><span>Your log is only on this phone. Sign in to back it up automatically.</span><button class="btn" data-act="settings-open" style="min-height:36px">Sign in</button></div>`;
   // no cloud account: the log lives on this phone, so nudge a backup every two weeks
   const last = S.profile.lastBackup || 0;
   if (S.workouts.length && Date.now() - last > 14 * DAY)
@@ -195,9 +196,11 @@ function viewEditWorkout() {
         ${e.timed ? '<span></span>' : `<input id="ed-w-${ei}-${si}" data-in="ed-w" data-e="${ei}" data-s="${si}" inputmode="decimal" value="${fmtW(s.w)}" placeholder="${e.kind === 'bodyweight' ? 'BW' : ''}" aria-label="Weight">`}
         <input id="ed-r-${ei}-${si}" data-in="ed-r" data-e="${ei}" data-s="${si}" inputmode="numeric" value="${s.r ?? ''}" aria-label="${e.timed ? 'Seconds' : 'Reps'}">
         <button class="iconbtn" data-act="ed-rm-set" data-e="${ei}" data-s="${si}" aria-label="Remove set">✕</button></div>`).join('')}
-      <button class="btn ghost" data-act="ed-add-set" data-e="${ei}" style="align-self:flex-start">+ Add set</button></div>`).join('');
+      <button class="btn ghost" data-act="ed-add-set" data-e="${ei}" style="align-self:flex-start">+ Add set</button>
+      <textarea id="ed-note-${ei}" class="note-in" data-in="ed-note" data-e="${ei}" rows="2" placeholder="Note for this exercise">${esc(e.note || '')}</textarea></div>`).join('');
   return `<div class="row between"><h2>${d.isNew ? 'Log workout' : 'Edit workout'}</h2><button class="iconbtn" data-act="ed-cancel" aria-label="Cancel editing">✕</button></div>
     ${d.isNew ? `<label class="field">Name<input id="ed-name" data-in="ed-name" value="${esc(d.routineName)}"></label>` : ''}
+    <label class="field">Workout note<textarea id="ed-wnote" class="note-in" data-in="ed-wnote" rows="2" placeholder="Energy, sleep, anything worth remembering">${esc(d.note || '')}</textarea></label>
     <div class="row">
       <label class="field grow">Date<input id="ed-date" data-in="ed-date" type="date" value="${d.dateStr}" max="${localISO(Date.now())}"></label>
       <label class="field grow">Duration (min)<input id="ed-dur" data-in="ed-dur" inputmode="numeric" value="${d.durMin}"></label>
@@ -233,7 +236,7 @@ function saveEditor() {
   if (!(dur > 0 && dur < 600)) { d.msg = 'Enter a duration in minutes, like 55.'; render(); return; }
   const day = d.dateStr ? fromISO(d.dateStr) : startOfDay(w.startedAt);
   const startedAt = day + (w.startedAt - startOfDay(w.startedAt));   // keep the original time of day
-  Object.assign(w, {exercises, startedAt, endedAt: startedAt + dur * 60000, calories: d.calories > 0 ? d.calories : null});
+  Object.assign(w, {exercises, startedAt, endedAt: startedAt + dur * 60000, calories: d.calories > 0 ? d.calories : null, note: (d.note || '').trim()});
   if (d.isNew) { w.routineName = (d.routineName || '').trim() || 'Custom workout'; S.workouts.push(w); }
   S.workouts.sort((a, b) => b.startedAt - a.startedAt);
   store.saveWorkout(w);
@@ -298,8 +301,12 @@ function viewWorkout() {
         <button class="btn danger ${S.armed === 'rmex' + ei ? 'armed' : ''}" data-act="ex-remove" data-e="${ei}">${S.armed === 'rmex' + ei ? 'Tap again to remove' : 'Remove exercise'}</button></div>` : '';
     return `<section class="card ex">
       <div class="ex-head"><div class="grow stack" style="gap:2px"><h3>${esc(e.name)}</h3><span class="ex-meta num">${e.target || e.sets.length} × ${rangeText(e)}${e.timed ? 's' : ''} · rest ${fmtDur(e.rest)} · ${esc(e.muscle || '')}</span></div>
+      <button class="iconbtn ${e.note ? 'has-note' : ''}" data-act="ex-note" data-e="${ei}" aria-label="${e.note ? 'Edit note' : 'Add a note'}">${ICON_NOTE}</button>
       <button class="iconbtn" data-act="ex-menu" data-e="${ei}" aria-label="Exercise options">${ICON.dots}</button></div>
       ${menu}
+      ${e.cue ? `<div class="cue">${ICON_PIN}<span>${esc(e.cue)}</span></div>` : ''}
+      ${(() => { const prev = lastPerf(e.exId, a.startedAt, a.id); return prev && prev.e.note ? `<div class="prev-note"><b>Last time:</b> ${esc(prev.e.note)}</div>` : ''; })()}
+      ${S.noteOpen && S.noteOpen[ei] || e.note ? `<textarea id="note-${ei}" class="note-in" data-in="ex-note" data-e="${ei}" rows="2" placeholder="How it felt, setup, pain, anything for next time">${esc(e.note || '')}</textarea>` : ''}
       ${e.hint ? `<div class="hint ${e.hint.tone}">${esc(e.hint.text)}</div>` : ''}
       <div class="sets"><div class="set hd"><span>Set</span><span>Previous</span><span>${e.timed ? '' : unit()}</span><span>${e.timed ? 'Sec' : 'Reps'}</span><span></span></div>${rows}</div>
       ${e.kind === 'barbell' ? `<div class="plates" id="plates-${ei}">${platesHTML(pw)}</div>` : ''}
@@ -317,6 +324,7 @@ function viewWorkout() {
       <button class="btn primary" data-act="finish-open">Finish</button></div>
     ${exs}
     <button class="btn block" data-act="add-ex-open">+ Add exercise</button>
+    <label class="field">Workout note<textarea id="wk-note" class="note-in" data-in="wk-note" rows="2" placeholder="Energy, sleep, anything worth remembering">${esc(a.note || '')}</textarea></label>
     <p class="small muted">Tap a set number to mark it as a warm-up. Warm-ups don't count toward records or progression.</p>
   </div>${rest}`;
 }
@@ -382,9 +390,11 @@ function viewSheet() {
     const w = S.workouts.find(x => x.id === S.sheet.id); if (!w) { S.sheet = null; return ''; }
     const {v, sets} = volume(w);
     const exs = w.exercises.map(e => `<div class="stack"><div class="row between"><b>${esc(e.name)}</b>${(w.prs || []).includes(e.exId) ? '<span class="chip pr">PR</span>' : ''}</div>
+      ${e.note ? `<div class="prev-note">${esc(e.note)}</div>` : ''}
       <table class="dtable num"><tbody>${e.sets.map((s, i) => `<tr><td class="muted">${s.warm ? 'Warm-up' : 'Set ' + (i + 1)}</td><td>${e.timed ? `${s.r}s` : (s.w ? `${fmtW(conv(s.w, w.unit))} ${unit()} × ${s.r}` : `${s.r} reps`)}</td></tr>`).join('')}</tbody></table></div>`).join('');
     body = `<div class="row between"><div class="stack"><p class="eyebrow">${fmtDate(w.startedAt)}</p><h2>${esc(w.routineName)}</h2></div><button class="iconbtn" data-act="sheet-close" aria-label="Close">✕</button></div>
       ${workoutStats(w)}
+      ${w.note ? `<div class="prev-note"><b>Note:</b> ${esc(w.note)}</div>` : ''}
       ${figureBlock(w)}
       <div class="row"><button class="btn primary grow" data-act="share-open" data-v="${esc(w.id)}">Share workout</button><button class="btn grow" data-act="ed-open" data-v="${esc(w.id)}">Edit workout</button></div>
       ${exs}

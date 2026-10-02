@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 
-const FILES = ['core', 'training', 'ui', 'program', 'body', 'food', 'adaptive', 'figure', 'share', 'tester', 'events'];
+const FILES = ['core', 'training', 'ui', 'program', 'body', 'food', 'adaptive', 'figure', 'share', 'tester', 'settings', 'events'];
 const DAY = 86400000;
 
 function loadApp(stored = {}) {
@@ -21,13 +21,13 @@ function loadApp(stored = {}) {
     document, location: {protocol: 'file:', href: 'file:///'}, performance: {now: () => 0},
     navigator: {onLine: true, userAgent: 'node', maxTouchPoints: 0},
     localStorage: {getItem: k => store.has(k) ? store.get(k) : null, setItem: (k, v) => store.set(k, String(v)), removeItem: k => store.delete(k)},
-    matchMedia: () => ({matches: false}), addEventListener() {}, scrollTo() {}, scrollBy() {}, LIFTBOOK_CONFIG: {},
+    matchMedia: () => ({matches: false}), addEventListener() {}, scrollTo() {}, scrollBy() {}, getComputedStyle: () => ({getPropertyValue: () => ''}), LIFTBOOK_CONFIG: {},
   };
   ctx.window = ctx; ctx.self = ctx;
   vm.createContext(ctx);
   // top-level const/let live in the context's script scope; expose the names tests need
   const src = FILES.map(f => fs.readFileSync(new URL(`../js/${f}.js`, import.meta.url), 'utf8')).join('\n;\n') +
-    '\n;globalThis.T = {S, store, suggest, e1rm, niceTicks, weightSeries, weeklyRateKg, caloriesFor, improvements, recomputePRs, muscleLoad, musclesFor, tagFor, lastPerf, scanKg, conv, TEMPLATE, CATALOG, slug, startOfDay, fromUsda, fromOff, rankFoods, unitsFor, portionTotals, autoTargets, dayTotals, estimateBurn, targets, targetsFromBurn, copyMeal, foodLogs, viewToday, viewFood, viewProgress, viewBody, viewProgram, viewSheet, viewWorkout, startWorkout, TEMPLATE_COPY: () => JSON.parse(JSON.stringify(TEMPLATE))};';
+    '\n;globalThis.T = {S, store, suggest, e1rm, niceTicks, weightSeries, weeklyRateKg, caloriesFor, improvements, recomputePRs, muscleLoad, musclesFor, tagFor, lastPerf, scanKg, conv, TEMPLATE, CATALOG, slug, startOfDay, fromUsda, fromOff, rankFoods, unitsFor, portionTotals, autoTargets, dayTotals, estimateBurn, targets, targetsFromBurn, copyMeal, foodLogs, viewToday, viewFood, viewProgress, viewBody, viewProgram, viewSheet, viewWorkout, startWorkout, viewSettings, TEMPLATE_COPY: () => JSON.parse(JSON.stringify(TEMPLATE))};';
   vm.runInContext(src, ctx, {filename: 'liftbook.js'});
   return ctx.T;
 }
@@ -258,7 +258,7 @@ test('food: copying yesterday’s meal makes new entries for today', () => {
 test('every tab and the main sheets draw without errors, empty and with data', () => {
   const T = loadApp();
   const draw = label => {
-    for (const [name, fn] of [['Today', T.viewToday], ['Food', T.viewFood], ['Progress', T.viewProgress], ['Body', T.viewBody], ['Program', T.viewProgram]]) {
+    for (const [name, fn] of [['Settings', T.viewSettings], ['Today', T.viewToday], ['Food', T.viewFood], ['Progress', T.viewProgress], ['Body', T.viewBody], ['Program', T.viewProgram]]) {
       assert.doesNotThrow(() => { const html = fn(); assert.ok(html.length > 50); }, `${name} tab (${label})`);
     }
   };

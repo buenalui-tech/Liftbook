@@ -2,7 +2,7 @@
 // Classic script: files load in order (see index.html) and share top-level names.
 
 /* ---------- helpers ---------- */
-const APP_VERSION = '22';   // keep in step with VERSION in sw.js (liftbook-v22)
+const APP_VERSION = '23';   // keep in step with VERSION in sw.js (liftbook-v23)
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 const slug = s => String(s).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'exercise';
@@ -23,6 +23,7 @@ const ICON = {
   prog:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 20h18M5 16l5-5 4 3 6-7"/></svg>',
   body:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="4.5" r="2.5"/><path d="M7 9.5h10M12 9.5v5M9.5 21l2.5-6.5 2.5 6.5M7 9.5l-1.5 5M17 9.5l1.5 5"/></svg>',
   food:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 3v7a2 2 0 0 0 2 2v9M11 3v7a2 2 0 0 1-2 2M9 3v6M17 21V3c-2 1.5-3 4-3 7s1 4 3 4"/></svg>',
+  note:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>',
   plan:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01"/></svg>'
 };
 
@@ -322,7 +323,7 @@ function syncPill() {
   if (!Sync.user) return '<span class="syncpill"></span>';
   const map = {idle: ['ok', 'Synced'], saving: ['busy', 'Syncing…'], offline: ['off', 'Offline · saved on phone'], error: ['err', 'Sync problem'], off: ['off', '']};
   const [cls, label] = map[Sync.status] || map.off;
-  return label ? `<button class="syncpill ${cls}" data-act="tab" data-v="program">${label}</button>` : '<span class="syncpill"></span>';
+  return label ? `<button class="syncpill ${cls}" data-act="settings-open">${label}</button>` : '<span class="syncpill"></span>';
 }
 function syncStatusText() {
   if (Sync.status === 'error') return 'Last sync failed: ' + (Sync.detail || 'unknown error') + '. Your log is safe on this phone.';
@@ -352,3 +353,6 @@ const S = {
   meta: freshMeta(), authEmail: '', authMsg: '', authBusy: false,
   body: [], food: [], scanIdx: null, scanCompare: 'prev', bodySeg: null, wtRange: 90, wtAll: false, wtOpen: false, scanMsg: ''
 };
+
+const ICON_NOTE = ICON.note;
+const ICON_PIN = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 17v5M9 3h6l-1 6 3 3H7l3-3z"/></svg>';

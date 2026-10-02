@@ -63,6 +63,14 @@ const A = {
   },
   'dismiss-summary': () => { S.summary = null; render(); },
   'sync-now': () => Sync.run(true),
+  'settings-open': () => { S.screen = 'settings'; S.sheet = null; render(); window.scrollTo(0, 0); },
+  'settings-close': () => { S.screen = S.active && S.wasInWorkout ? 'workout' : 'tabs'; render(); window.scrollTo(0, 0); },
+  'set-theme': d => { setSetting('theme', d.v); render(); },
+  'set-accent': d => { setSetting('accent', d.v); render(); },
+  'set-sound': d => { setSetting('sound', d.v); render(); playSound(d.v); },
+  'sound-test': () => playSound(),
+  'set-toggle': d => { setSetting(d.v, !setting(d.v)); render(); },
+  'ex-note': d => { S.noteOpen = {...(S.noteOpen || {}), [d.e]: !(S.noteOpen && S.noteOpen[d.e])}; render(); const t = document.getElementById('note-' + d.e); if (t) t.focus(); },
   'food-add': d => { S.sheet = {type: 'add-food', meal: d.v, mode: 'search', q: ''}; render(); const i = document.getElementById('food-q'); if (i) i.focus(); },
   'food-mode': d => { S.sheet.mode = d.v; render(); },
   'food-pick': d => { const f = S.sheet.results && S.sheet.results[+d.v]; if (f) openPortion(f, S.sheet.meal); },
@@ -205,6 +213,7 @@ document.addEventListener('input', ev => {
   } else if (k.startsWith('p-')) {
     const ex = S.program.routines[+el.dataset.r].exercises[+el.dataset.x], f = k.slice(2);
     if (f === 'name') { const nm = el.value.trim(); if (nm) { ex.name = nm; ex.id = slug(nm); } }
+    else if (f === 'cue') ex.cue = el.value.trim();
     else { const n = parseInt(el.value, 10); if (n > 0) ex[f] = n; if (ex.repMax < ex.repMin && f !== 'rest' && f !== 'sets') {} }
     saveProgramSoon();
   } else if (k === 'auth-email') { S.authEmail = el.value;
@@ -215,6 +224,11 @@ document.addEventListener('input', ev => {
   } else if (k === 'ed-date') { S.sheet.edit.dateStr = el.value;
   } else if (k === 'ed-name') { S.sheet.edit.routineName = el.value;
   } else if (k === 'fb-msg') { S.sheet.msg = el.value;
+  } else if (k === 'ex-note') { S.active.exercises[+el.dataset.e].note = el.value; saveActiveSoon();
+  } else if (k === 'wk-note') { S.active.note = el.value; saveActiveSoon();
+  } else if (k === 'ed-note') { S.sheet.edit.exercises[+el.dataset.e].note = el.value;
+  } else if (k === 'ed-wnote') { S.sheet.edit.note = el.value;
+  } else if (k === 'set-volume') { S.profile.settings = {...(S.profile.settings || {}), volume: +el.value}; later('profile', () => store.saveProfile());
   } else if (k === 'food-q') { S.sheet.q = el.value; later('food-q', () => runSearch(el.value), 450);
   } else if (k === 'po-qty' || k === 'po-unit') {
     if (k === 'po-qty') S.sheet.qty = el.value; else S.sheet.unit = el.value;
@@ -300,6 +314,7 @@ async function importFile(file) {
   S.workouts = (d.workouts || []).sort((a, b) => b.startedAt - a.startedAt);
   S.body = (d.body || []).sort((a, b) => b.date - a.date);
   S.food = (d.food || []).sort((a, b) => b.date - a.date);
+  applyAppearance();
   S.active = d.active || null;
   // defaults keep a zero timestamp so they never overwrite a program already saved in the cloud
   if (!d.program || !d.profile) store.persistLocal();

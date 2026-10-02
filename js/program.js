@@ -32,7 +32,8 @@ function viewProgramBuilder() {
         <label class="field">Min ${ex.timed ? 's' : 'reps'}<input id="pmin-${ri}-${xi}" inputmode="numeric" data-in="p-repMin" data-r="${ri}" data-x="${xi}" value="${ex.repMin}"></label>
         <label class="field">Max ${ex.timed ? 's' : 'reps'}<input id="pmax-${ri}-${xi}" inputmode="numeric" data-in="p-repMax" data-r="${ri}" data-x="${xi}" value="${ex.repMax}"></label>
         <label class="field">Rest s<input id="pr-${ri}-${xi}" inputmode="numeric" data-in="p-rest" data-r="${ri}" data-x="${xi}" value="${ex.rest}"></label>
-      </div></div>`).join('');
+      </div>
+      <label class="field">Pinned note (shows in every workout)<input id="pcue-${ri}-${xi}" data-in="p-cue" data-r="${ri}" data-x="${xi}" value="${esc(ex.cue || '')}" placeholder="Seat at notch 4, pause at the bottom"></label></div>`).join('');
     return `<div class="stack day-edit">
       <div class="row between"><p class="eyebrow" style="margin:0">Day ${ri + 1}</p><button class="btn primary" data-act="edit-routine" data-v="">Done</button></div>
       <div class="row"><label class="field grow">Day name<input id="dn-${ri}" data-in="day-name" data-r="${ri}" value="${esc(r.name)}" placeholder="Push"></label>
@@ -84,24 +85,9 @@ function setProgram(p, msg, tab = 'today') {
 }
 
 function viewProgram() {
-  const u = unit();
   return `${brand('Program')}${storageBanner()}
-    <section class="card row between" style="flex-direction:row;align-items:center"><div class="stack" style="gap:2px"><h3>Help shape Liftbook</h3><span class="small muted">Found a bug or have an idea?</span></div><button class="btn primary" data-act="feedback-open">Send feedback</button></section>
     ${S.program ? viewProgramBuilder() : programSetupCard()}
-    <section class="card"><h3>Settings</h3>
-      <div class="row between"><span>Units</span><div class="seg"><button data-act="unit" data-v="lb" aria-pressed="${u === 'lb'}">lb</button><button data-act="unit" data-v="kg" aria-pressed="${u === 'kg'}">kg</button></div></div>
-      <div class="row between"><label for="set-bar">Barbell weight (${u})</label><input id="set-bar" data-in="bar" inputmode="decimal" value="${fmtW(S.profile.bar)}" style="width:90px;height:40px;text-align:center;border:1px solid var(--line);border-radius:8px;background:var(--sunk)"></div>
-      <div class="row between"><label for="set-goal">Sessions per week</label><input id="set-goal" data-in="goal" inputmode="numeric" value="${S.profile.weeklyGoal || 4}" style="width:90px;height:40px;text-align:center;border:1px solid var(--line);border-radius:8px;background:var(--sunk)"></div>
-      <p class="small muted">Past workouts keep the unit they were logged in and are converted for display.</p>
-    </section>
-    ${viewAccount()}
-    <section class="card"><h3>Backups</h3>
-      <p class="small muted">${Sync.user ? 'Your log syncs to your account automatically. Exports are an extra copy you keep yourself.' : 'Export a backup now and then, and use Import to move your log to a new phone.'}</p>
-      <div class="row" style="flex-wrap:wrap"><button class="btn" data-act="export-json">Export backup (.json)</button><button class="btn" data-act="export-csv">Export sets (.csv)</button><label class="btn" for="import-file">Import backup</label><input type="file" id="import-file" accept=".json,application/json" hidden></div>
-    </section>
-    <section class="card"><h3>Credits</h3>
-      <p class="small muted" style="margin:0">3D muscle figure adapted from <a href="https://github.com/Z-Anatomy/Models-of-human-anatomy" target="_blank" rel="noopener">Z-Anatomy</a> (CC BY-SA 4.0) and <a href="https://dbarchive.biosciencedbc.jp/en/bodyparts3d/" target="_blank" rel="noopener">BodyParts3D</a>, The Database Center for Life Science (CC BY-SA 2.1 JP). The adapted figure is shared under <a href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank" rel="noopener">CC BY-SA 4.0</a>.</p>
-    </section>`;
+    <p class="small muted" style="text-align:center">Units, account, backups and sounds are in Settings (the gear, top right).</p>`;
 }
 
 function viewAccount() {

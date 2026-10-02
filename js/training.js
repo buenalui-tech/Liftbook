@@ -83,7 +83,7 @@ function buildEx(ex) {
   const sug = suggest(ex), last = lastPerf(ex.id);
   return {
     exId: ex.id, name: ex.name, kind: ex.kind, muscle: ex.muscle, repMin: ex.repMin, repMax: ex.repMax,
-    rest: ex.rest || 90, timed: !!ex.timed, target: ex.sets, hint: sug, muscles: ex.muscles,
+    rest: ex.rest || 90, timed: !!ex.timed, target: ex.sets, hint: sug, muscles: ex.muscles, cue: ex.cue || '',
     sets: Array.from({length: ex.sets}, (_, i) => ({
       w: ex.timed ? null : (sug.w ?? (last && last.sets[i] ? conv(last.sets[i].w, last.w.unit) : null)),
       r: null, done: false, warm: false }))
@@ -113,7 +113,7 @@ function toggleSet(ei, si) {
       s.w = before ?? (p && p.w ? p.w : null);
     }
     if (!(s.r > 0)) { toast('Enter reps first'); return; }
-    s.done = true; startRest(e.rest);
+    s.done = true; if (setting('autoRest')) startRest(e.rest);
   } else s.done = false;
   saveActiveSoon(); render();
 }
@@ -149,17 +149,14 @@ function discardWorkout() {
 /* ---------- rest timer, sound, wake lock ---------- */
 let audio = null;
 function unlockAudio() { try { if (!audio) audio = new (window.AudioContext || window.webkitAudioContext)(); if (audio.state === 'suspended') audio.resume(); } catch {} }
+// rest is over: the chosen sound (see js/settings.js) and, where phones allow it, a buzz
 function beep() {
-  try { if (navigator.vibrate) navigator.vibrate([200, 100, 200]); } catch {}
-  try {
-    if (!audio) return;
-    [0, .25].forEach(off => { const o = audio.createOscillator(), g = audio.createGain(); o.frequency.value = 880; o.connect(g); g.connect(audio.destination);
-      const t = audio.currentTime + off; g.gain.setValueAtTime(.0001, t); g.gain.exponentialRampToValueAtTime(.3, t + .02); g.gain.exponentialRampToValueAtTime(.0001, t + .18); o.start(t); o.stop(t + .2); });
-  } catch {}
+  try { if (setting('vibrate') && canVibrate()) navigator.vibrate([200, 100, 200]); } catch {}
+  playSound();
 }
 function startRest(sec) { S.rest = {endAt: Date.now() + sec * 1000, total: sec, rang: false}; }
 let lock = null;
-async function wake() { try { if (navigator.wakeLock && !lock) { lock = await navigator.wakeLock.request('screen'); lock.addEventListener('release', () => { lock = null; }); } } catch {} }
+async function wake() { if (!setting('keepAwake')) return; try { if (navigator.wakeLock && !lock) { lock = await navigator.wakeLock.request('screen'); lock.addEventListener('release', () => { lock = null; }); } } catch {} }
 function release() { try { lock && lock.release(); } catch {} lock = null; }
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && S.active) wake(); });
 
@@ -169,6 +166,9 @@ setInterval(() => {
   if (S.rest) {
     const left = (S.rest.endAt - Date.now()) / 1000;
     if (left <= 0 && !S.rest.rang) { S.rest.rang = true; beep(); }
+    // countdown: one tick at 3, 2 and 1 seconds left
+    const sec = Math.ceil(left);
+    if (setting('countdown') && sec >= 1 && sec <= 3 && S.rest.tick !== sec) { S.rest.tick = sec; playTick(); }
     if (left < -20) { S.rest = null; render(); return; }
     const t = document.getElementById('rest-t'), f = document.getElementById('rest-f'), box = document.getElementById('rest');
     if (t) t.textContent = left > 0 ? fmtDur(Math.ceil(left)) : 'Go';
