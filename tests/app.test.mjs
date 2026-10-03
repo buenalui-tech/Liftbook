@@ -9,7 +9,7 @@ import vm from 'node:vm';
 const FILES = ['core', 'training', 'ui', 'program', 'body', 'food', 'adaptive', 'figure', 'share', 'tester', 'settings', 'timer', 'events'];
 const DAY = 86400000;
 
-function loadApp(stored = {}) {
+function loadApp(stored = {}, extra = {}) {
   const store = new Map(Object.entries(stored).map(([k, v]) => [k, JSON.stringify(v)]));
   const el = () => ({innerHTML: '', textContent: '', hidden: false, style: {}, classList: {toggle() {}, contains() { return false; }},
     addEventListener() {}, appendChild() {}, remove() {}, querySelectorAll: () => [], querySelector: () => null, isConnected: false, dataset: {}});
@@ -23,11 +23,12 @@ function loadApp(stored = {}) {
     localStorage: {getItem: k => store.has(k) ? store.get(k) : null, setItem: (k, v) => store.set(k, String(v)), removeItem: k => store.delete(k)},
     matchMedia: () => ({matches: false}), addEventListener() {}, scrollTo() {}, scrollBy() {}, getComputedStyle: () => ({getPropertyValue: () => ''}), LIFTBOOK_CONFIG: {},
   };
+  Object.assign(ctx, extra);
   ctx.window = ctx; ctx.self = ctx;
   vm.createContext(ctx);
   // top-level const/let live in the context's script scope; expose the names tests need
   const src = FILES.map(f => fs.readFileSync(new URL(`../js/${f}.js`, import.meta.url), 'utf8')).join('\n;\n') +
-    '\n;globalThis.T = {S, store, suggest, e1rm, niceTicks, weightSeries, weeklyRateKg, caloriesFor, improvements, recomputePRs, muscleLoad, musclesFor, tagFor, lastPerf, scanKg, conv, TEMPLATE, CATALOG, slug, startOfDay, fromUsda, fromOff, rankFoods, unitsFor, portionTotals, autoTargets, dayTotals, estimateBurn, targets, targetsFromBurn, computeTargets, nutritionPrefs, proposeTargets, applyCheckin, runAutoCheckin, checkinDue, copyMeal, foodLogs, viewToday, viewFood, viewProgress, viewBody, viewProgram, viewSheet, viewWorkout, startWorkout, viewSettings, buildPhases, Timer, viewTimer, viewTimerSetup, viewMobilitySetup, MOBILITY, viewTrainingLoad, sessionLoad, caloriesFor, TEMPLATE_COPY: () => JSON.parse(JSON.stringify(TEMPLATE))};';
+    '\n;globalThis.T = {S, store, suggest, e1rm, niceTicks, weightSeries, weeklyRateKg, caloriesFor, improvements, recomputePRs, muscleLoad, musclesFor, tagFor, lastPerf, scanKg, conv, TEMPLATE, CATALOG, slug, startOfDay, fromUsda, fromOff, rankFoods, unitsFor, portionTotals, autoTargets, dayTotals, estimateBurn, targets, targetsFromBurn, computeTargets, nutritionPrefs, proposeTargets, applyCheckin, runAutoCheckin, checkinDue, copyMeal, foodLogs, viewToday, viewFood, viewProgress, viewBody, viewProgram, viewSheet, viewWorkout, startWorkout, viewSettings, buildPhases, Timer, viewTimer, viewTimerSetup, viewMobilitySetup, MOBILITY, viewTrainingLoad, sessionLoad, specFromVals, specToSheet, cleanSpec, specSecs, finishWorkout, timerOutline, viewTimerSetup, TEMPLATE_COPY: () => JSON.parse(JSON.stringify(TEMPLATE))};';
   vm.runInContext(src, ctx, {filename: 'liftbook.js'});
   return ctx.T;
 }
@@ -275,7 +276,7 @@ test('every tab and the main sheets draw without errors, empty and with data', (
   // sheets reached from those tabs
   for (const sheet of [{type: 'add-food', meal: 'lunch', mode: 'search'}, {type: 'add-food', meal: 'lunch', mode: 'recent'}, {type: 'add-food', meal: 'lunch', mode: 'mine'},
     {type: 'add-food', meal: 'lunch', mode: 'quick'}, {type: 'custom-food', meal: 'lunch'}, {type: 'barcode', meal: 'lunch'}, {type: 'targets'}, {type: 'targets', draft: {kcalMode: 'manual', kcal: 2400, split: 'percent', pct: {p: 40, f: 30}}}, {type: 'targets', draft: {kcalMode: 'auto', split: 'grams', grams: {p: 180, c: 250, f: 70}, pct: {p: 30, f: 30}}}, {type: 'save-meal', meal: 'lunch'},
-    {type: 'detail', id: 'a'}, {type: 'detail', id: 'r'}, {type: 'log', day: T.startOfDay(Date.now())}, {type: 'log', day: T.startOfDay(Date.now()), form: {type: 'treadmill', dateStr: '2026-10-01', rpe: 6}}, {type: 'log', day: T.startOfDay(Date.now()), form: {type: 'rower', dateStr: '2026-10-01'}}, {type: 'timer-setup', kind: 'emom', vals: {minutes: 12}}, {type: 'mobility-setup', hold: 0}, {type: 'scan'}, {type: 'feedback', kind: 'bug'}]) {
+    {type: 'detail', id: 'a'}, {type: 'detail', id: 'r'}, {type: 'log', day: T.startOfDay(Date.now())}, {type: 'log', day: T.startOfDay(Date.now()), form: {type: 'treadmill', dateStr: '2026-10-01', rpe: 6}}, {type: 'log', day: T.startOfDay(Date.now()), form: {type: 'rower', dateStr: '2026-10-01'}}, {type: 'timer-setup', kind: 'emom', vals: {minutes: 12}}, {type: 'timer-setup', ...T.specToSheet(null), kind: 'custom'}, {type: 'timer-setup', ...T.specToSheet(null), forDay: 'upper-a'}, {type: 'timer-setup', ...T.specToSheet(null), forStart: 'upper-a'}, {type: 'mobility-setup', hold: 0}, {type: 'scan'}, {type: 'feedback', kind: 'bug'}]) {
     T.S.sheet = sheet;
     assert.doesNotThrow(() => T.viewSheet(), `sheet ${sheet.type}${sheet.mode ? '/' + sheet.mode : ''}`);
   }
@@ -379,4 +380,74 @@ test('effort: scales calorie estimates and drives training load; treadmill incli
   const walk = {id: 't', kind: 'activity', type: 'treadmill', exercises: [], startedAt: 0, endedAt: 30 * 60000, speed: 3.5, speedUnit: 'mph'};
   T.S.body[0].date = -DAY;
   assert.ok(T.caloriesFor({...walk, incline: 10}).kcal > T.caloriesFor({...walk, incline: 0}).kcal * 1.6, 'a 10% incline walk costs much more than flat');
+});
+
+test('custom timer: warm-up, effort steps repeated, cool-down, and what the voice says', () => {
+  const T = loadApp();
+  const spec = T.specFromVals('custom', {warmup: 3, cooldown: 2, rounds: 4, steps: [{label: 'Sprint', secs: 30, level: 'max', target: '9 mph'}, {label: 'Recover', secs: 90, level: 'easy'}]});
+  assert.ok(!spec.err, spec.err);
+  const P = T.buildPhases(spec);
+  assert.equal(P[1].label, 'Warm-up'); assert.equal(P[1].secs, 180);
+  assert.equal(P.filter(p => p.level === 'max').length, 4);
+  assert.equal(P.filter(p => p.label === 'Recover').length, 3, 'the last recovery runs straight into the cool-down');
+  assert.equal(P[P.length - 1].label, 'Cool-down'); assert.equal(P[P.length - 1].secs, 120);
+  const sprint = P.find(p => p.level === 'max');
+  assert.equal(sprint.say, 'Sprint, all out. 30 seconds. 9 mph'); assert.equal(sprint.sub, '9 mph');
+  assert.equal(P.find(p => p.label === 'Recover').say, 'Recover, easy. 1 minute 30');
+  assert.equal(P[0].say, 'Get ready. First, warm-up');
+  assert.equal(T.specSecs(spec), 180 + 4 * 30 + 3 * 90 + 120);
+  assert.ok(T.timerOutline(spec).includes('4 rounds of'));
+  // bad input is caught, and anything stored or imported goes through the same checks
+  assert.ok(T.specFromVals('custom', {rounds: 4, steps: []}).err);
+  assert.ok(T.specFromVals('custom', {rounds: 4, steps: [{secs: 2, level: 'hard'}]}).err);
+  assert.equal(T.cleanSpec({kind: 'custom', rounds: 1e9, steps: [{secs: 30, level: 'hard'}]}), null);
+  assert.deepEqual(T.cleanSpec(spec), spec, 'a valid spec survives the round trip unchanged');
+  assert.equal(T.cleanSpec({kind: 'intervals', work: 20, rest: 40, rounds: 10}).rest, 40);
+});
+
+test('timer: spoken prompts call each step, warn 10 seconds ahead, and the current step can be stretched', () => {
+  const said = [];
+  class SpeechSynthesisUtterance { constructor(t) { this.text = t; } }
+  const T = loadApp({}, {SpeechSynthesisUtterance, speechSynthesis: {speak: u => said.push(u.text), cancel() {}, getVoices: () => []}});
+  T.Timer.start(T.specFromVals('custom', {warmup: 0, cooldown: 0, rounds: 2, steps: [{label: 'Sprint', secs: 30, level: 'max'}, {label: 'Recover', secs: 60, level: 'easy'}]}));
+  assert.equal(said.pop(), 'Get ready. First, Sprint, all out');
+  const t = T.S.timer;
+  t.phaseStart -= 10 * 1000; T.Timer.update();
+  assert.equal(said.pop(), 'Sprint, all out. 30 seconds');
+  t.phaseStart -= 20 * 1000 + 1; T.Timer.update();
+  assert.equal(said.pop(), '10 seconds. Next, Recover, easy', 'heads-up before backing off');
+  T.Timer.adjust(10);
+  assert.equal(t.phases[t.idx].secs, 40, '+10 s stretches only the step you are in');
+  assert.equal(T.buildPhases(t.spec)[1].secs, 30, 'the saved timer is unchanged');
+  T.S.profile.settings = {voice: false};
+  const before = said.length;
+  t.phaseStart -= 40 * 1000; T.Timer.update();
+  assert.equal(t.phases[t.idx].label, 'Recover');
+  assert.equal(said.length, before, 'nothing is spoken with the prompts turned off');
+});
+
+test('program: a timer-only day opens its timer; a finisher saves inside the lifting workout', () => {
+  const T = loadApp();
+  T.S.program = T.TEMPLATE_COPY();
+  const hiit = {id: 'hiit', name: 'HIIT', tag: 'HI', focus: '', exercises: [], timer: T.specFromVals('intervals', {work: 20, rest: 40, rounds: 10})};
+  T.S.program.routines.push(hiit);
+  T.S.program.routines[0].timer = T.specFromVals('custom', {warmup: 0, cooldown: 0, rounds: 1, steps: [{label: 'Bike', secs: 60, level: 'hard'}]});
+  // a timer-only day: Start opens the timer, prefilled and adjustable, and logs as that day
+  T.startWorkout('hiit');
+  assert.equal(T.S.sheet.type, 'timer-setup'); assert.equal(T.S.sheet.vals.rest, 40); assert.equal(T.S.active, null);
+  T.Timer.start(T.specFromVals('intervals', {work: 30, rest: 30, rounds: 10}), {routineId: 'hiit', routineName: 'HIIT'});
+  T.Timer.finish(true); T.Timer.save();
+  assert.equal(T.S.workouts[0].routineId, 'hiit'); assert.equal(T.S.workouts[0].routineName, 'HIIT');
+  assert.equal(hiit.timer.work, 20, 'changing today’s settings leaves the program alone');
+  // a lifting day with a finisher
+  T.startWorkout(T.S.program.routines[0].id);
+  assert.ok(T.viewWorkout().includes('Finisher'));
+  T.S.active.exercises[0].sets[0] = {w: 100, r: 10, done: true, warm: false};
+  T.Timer.start(T.S.program.routines[0].timer, {attach: true});
+  T.Timer.finish(true); T.Timer.save();
+  assert.equal(T.S.screen, 'workout'); assert.equal(T.S.active.conditioning.name, 'Custom intervals');
+  T.finishWorkout();
+  const w = T.S.workouts.find(x => x.conditioning);
+  assert.ok(w && w.exercises.length === 1, 'saved as one session with the lifts and the timer');
+  assert.ok(T.viewToday().length > 50);
 });

@@ -1,7 +1,7 @@
 // Liftbook — Settings: appearance, rest timer sound and behaviour, units, account, backups.
 // Classic script: files load in order (see index.html) and share top-level names.
 
-const SETTING_DEFAULTS = {theme: 'system', accent: 'blue', sound: 'beep', volume: 0.7, countdown: true, vibrate: true, keepAwake: true, autoRest: true, checkinMode: 'ask'};
+const SETTING_DEFAULTS = {theme: 'system', accent: 'blue', sound: 'beep', volume: 0.7, countdown: true, vibrate: true, keepAwake: true, autoRest: true, checkinMode: 'ask', voice: true};
 const setting = k => { const s = S.profile.settings || {}; return s[k] ?? SETTING_DEFAULTS[k]; };
 function setSetting(k, v) { S.profile.settings = {...(S.profile.settings || {}), [k]: v}; store.saveProfile(); applyAppearance(); }
 
@@ -74,12 +74,13 @@ function viewSettings() {
         `<button class="swatch ${accent === k ? 'on' : ''}" data-act="set-accent" data-v="${k}" style="--sw-l:${a.c[0]};--sw-d:${a.c[1]}" aria-label="${a.name}" aria-pressed="${accent === k}"></button>`).join('')}</div></div>
     </section>
 
-    <section class="card"><h3>Rest timer</h3>
+    <section class="card"><h3>Timers and sounds</h3>
       ${toggle('autoRest', 'Start automatically', 'When you check off a set')}
       <div class="set-row"><span>Sound</span><div class="seg" role="group" aria-label="Rest timer sound">${Object.entries(SOUNDS).map(([k, s]) => `<button data-act="set-sound" data-v="${k}" aria-pressed="${sound === k}">${s.name}</button>`).join('')}</div></div>
       <div class="set-row ${sound === 'off' ? 'disabled' : ''}"><label for="set-volume">Volume</label>
         <div class="row" style="gap:8px;flex:1;max-width:220px"><input type="range" id="set-volume" data-in="set-volume" min="0" max="1" step="0.05" value="${setting('volume')}" ${sound === 'off' ? 'disabled' : ''} aria-label="Rest timer volume"><button class="btn" data-act="sound-test" ${sound === 'off' ? 'disabled' : ''}>Test</button></div></div>
       ${toggle('countdown', 'Countdown beeps', 'A tick in each of the last 3 seconds')}
+      ${typeof window.speechSynthesis !== 'undefined' ? toggle('voice', 'Spoken prompts', 'The interval timer calls out each step, like “Sprint, all out, 30 seconds”') : ''}
       ${canVibrate() ? toggle('vibrate', 'Vibrate when rest ends') : ''}
       ${toggle('keepAwake', 'Keep screen on during workouts')}
       <p class="small muted" style="margin:0">${isIOS() ? 'On iPhone, sounds follow your phone’s volume and are muted when the ringer switch is on silent. They also can’t play while the screen is locked; that needs the App Store version.' : 'Volume is relative to your phone’s media volume. Sounds can’t play while the screen is off.'}</p>

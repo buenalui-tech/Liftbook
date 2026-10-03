@@ -91,7 +91,7 @@ function entryCard(w, withDate) {
     <div class="row between" style="width:100%"><h3>${esc(w.routineName)}</h3>
       <span class="row" style="gap:6px">${isActivity(w) ? '<span class="chip">Activity</span>' : ''}${prs ? `<span class="chip pr">${prs} PR${prs > 1 ? 's' : ''}</span>` : ''}</span></div>
     <div class="kv num">${withDate ? `<span>${fmtDate(w.startedAt)}</span>` : ''}${entrySummary(w).map((x, i) => i ? `<span>${esc(x)}</span>` : `<span><b>${esc(x)}</b></span>`).join('')}</div>
-    ${isActivity(w) ? (w.notes ? `<div class="small muted">${esc(w.notes)}</div>` : '') : `<div class="small muted">${w.exercises.map(e => esc(e.name.replace(/ \(.*\)$/, ''))).join(' · ')}</div>`}</button>`;
+    ${isActivity(w) ? (w.notes ? `<div class="small muted">${esc(w.notes)}</div>` : '') : `<div class="small muted">${[...w.exercises.map(e => esc(e.name.replace(/ \(.*\)$/, ''))), w.conditioning ? '+ ' + esc(w.conditioning.name) : ''].filter(Boolean).join(' · ')}</div>`}</button>`;
 }
 function viewToday() {
   const now = Date.now(), today = startOfDay(now);
@@ -116,16 +116,16 @@ function viewToday() {
   let plan = '';
   if (isToday) {
     const nr = nextRoutine();
-    const list = nr ? nr.exercises.map(ex => {
+    const list = nr && !nr.exercises.length && nr.timer ? timerOutline(nr.timer) : nr ? nr.exercises.map(ex => {
       const s = suggest(ex), tgt = `${ex.sets} × ${rangeText(ex)}${ex.timed ? 's' : ''}`;
       return `<li><span class="nm">${esc(ex.name)}</span><span class="tg num">${tgt}</span><span class="ht ${s.tone}">${s.w != null ? `<b>${fmtW(s.w)} ${unit()}</b> · ` : ''}${esc(s.text)}</span></li>`;
-    }).join('') : '';
+    }).join('') + (nr.timer ? `<li><span class="nm">Finisher: ${esc(specName(nr.timer))}</span><span class="tg num">${fmtDur(specSecs(nr.timer))}</span><span class="ht">${esc(specDetail(nr.timer))}</span></li>` : '') : '';
     const others = (S.program ? S.program.routines : []).filter(r => !nr || r.id !== nr.id).map(r => `
       <div class="routine-row"><span class="tag">${esc(r.tag || r.name.slice(0,2).toUpperCase())}</span>
-        <div class="grow"><div style="font-weight:600">${esc(r.name)}</div><div class="small muted">${esc(r.focus || '')} · ${r.exercises.length} exercises</div></div>
+        <div class="grow"><div style="font-weight:600">${esc(r.name)}</div><div class="small muted">${[r.focus, routineSummary(r)].filter(Boolean).map(esc).join(' · ')}</div></div>
         <button class="btn" data-act="start" data-v="${esc(r.id)}">Start</button></div>`).join('');
     plan = `${nr ? `<section class="card next">
-        <div class="row between"><div class="stack"><p class="eyebrow">Up next · ${esc(nr.focus || '')}</p><h2>${esc(nr.name)}</h2></div><span class="tag">${esc(nr.tag || '')}</span></div>
+        <div class="row between"><div class="stack"><p class="eyebrow">Up next${nr.focus ? ' · ' + esc(nr.focus) : ''}</p><h2>${esc(nr.name)}</h2></div><span class="tag">${esc(nr.tag || '')}</span></div>
         <ul class="plan">${list}</ul>
         <button class="btn primary lg block" data-act="start" data-v="${esc(nr.id)}">${S.active ? 'Resume workout' : `Start ${esc(nr.name)}`}</button>
       </section>` : programSetupCard()}
@@ -272,7 +272,7 @@ function saveEditor() {
   if (!w && d.isNew) w = {id: d.id, routineId: null, routineName: (d.routineName || '').trim() || 'Custom workout', unit: d.unit, startedAt: d.startedAt, exercises: []};
   if (!w) return;
   const exercises = d.exercises.map(e => ({...e, sets: e.sets.filter(s => s.r > 0).map(s => ({...s, done: true}))})).filter(e => e.sets.length);
-  if (!exercises.length) { d.msg = 'Add at least one set with reps, or delete the workout instead.'; render(); return; }
+  if (!exercises.length && !w.conditioning) { d.msg = 'Add at least one set with reps, or delete the workout instead.'; render(); return; }
   const dur = parseInt(d.durMin, 10);
   if (!(dur > 0 && dur < 600)) { d.msg = 'Enter a duration in minutes, like 55.'; render(); return; }
   const day = d.dateStr ? fromISO(d.dateStr) : startOfDay(w.startedAt);
@@ -364,7 +364,8 @@ function viewWorkout() {
       <div class="grow stack" style="gap:0"><span class="small muted">${esc(a.routineName)} · <span class="num">${done}/${total}</span> sets</span><span class="clock num" id="clock">${fmtDur((Date.now() - a.startedAt) / 1000)}</span></div>
       <button class="btn primary" data-act="finish-open">Finish</button></div>
     ${exs}
-    <button class="btn block" data-act="add-ex-open">+ Add exercise</button>
+    ${workoutTimerCard(a)}
+    <div class="row"><button class="btn grow" data-act="add-ex-open">+ Add exercise</button>${workoutTimerCard(a) ? '' : '<button class="btn grow" data-act="wk-timer">+ Add a timer</button>'}</div>
     <label class="field">Workout note<textarea id="wk-note" class="note-in" data-in="wk-note" rows="2" placeholder="Energy, sleep, anything worth remembering">${esc(a.note || '')}</textarea></label>
     <p class="small muted">Tap a set number to mark it as a warm-up. Warm-ups don't count toward records or progression.</p>
   </div>${rest}`;
@@ -376,9 +377,9 @@ function viewSheet() {
   if (S.sheet.type === 'finish') {
     const a = S.active, done = a.exercises.reduce((n, e) => n + e.sets.filter(s => s.done).length, 0), total = a.exercises.reduce((n, e) => n + e.sets.length, 0);
     body = `<h2>Finish ${esc(a.routineName)}?</h2>
-      <p class="muted">${done} of ${total} sets completed in ${fmtDur((Date.now() - a.startedAt) / 1000)}. Unchecked sets won't be saved.</p>
+      <p class="muted">${done} of ${total} sets completed${a.conditioning ? ` plus ${esc(a.conditioning.name)}` : ''} in ${fmtDur((Date.now() - a.startedAt) / 1000)}. Unchecked sets won't be saved.</p>
       ${rpePicker('active', a.rpe)}
-      <button class="btn primary lg block" data-act="finish" ${done ? '' : 'disabled'}>Save workout</button>
+      <button class="btn primary lg block" data-act="finish" ${done || a.conditioning ? '' : 'disabled'}>Save workout</button>
       <button class="btn block" data-act="sheet-close">Keep training</button>
       <button class="btn danger block ${S.armed === 'discard' ? 'armed' : ''}" data-act="discard">${S.armed === 'discard' ? 'Tap again to discard' : 'Discard workout'}</button>`;
   } else if (S.sheet.type === 'add-ex') {
@@ -445,6 +446,7 @@ function viewSheet() {
       ${figureBlock(w)}
       <div class="row"><button class="btn primary grow" data-act="share-open" data-v="${esc(w.id)}">Share workout</button><button class="btn grow" data-act="ed-open" data-v="${esc(w.id)}">Edit workout</button></div>
       ${exs}
+      ${w.conditioning ? `<div class="stack" style="gap:2px"><b>${esc(w.conditioning.name)}</b><span class="small muted num">${esc(conditioningLine(w.conditioning))}</span></div>` : ''}
       <button class="btn danger block ${S.armed === 'del' + w.id ? 'armed' : ''}" data-act="del-workout" data-v="${esc(w.id)}">${S.armed === 'del' + w.id ? 'Tap again to delete' : 'Delete workout'}</button>`;
   }
   return `<div class="scrim" data-act="scrim"><div class="sheet" role="dialog" aria-modal="true">${body}</div></div>`;

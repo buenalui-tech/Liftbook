@@ -21,7 +21,7 @@ function viewProgramBuilder() {
   const P = S.program;
   const days = P.routines.map((r, ri) => {
     if (S.editRoutine !== r.id) return `<div class="routine-row"><span class="tag">${esc(r.tag || tagFor(r.name))}</span>
-      <div class="grow"><div style="font-weight:600">${esc(r.name)}</div><div class="small muted">${r.focus ? esc(r.focus) + ' · ' : ''}${r.exercises.length} exercise${r.exercises.length === 1 ? '' : 's'}</div></div>
+      <div class="grow"><div style="font-weight:600">${esc(r.name)}</div><div class="small muted">${r.focus ? esc(r.focus) + ' · ' : ''}${esc(routineSummary(r))}</div></div>
       <button class="btn" data-act="edit-routine" data-v="${esc(r.id)}">Edit</button></div>`;
     const rows = r.exercises.map((ex, xi) => `<div class="edrow">
       <div class="row between"><b>${esc(ex.name)}</b><div class="row" style="gap:0">
@@ -38,8 +38,9 @@ function viewProgramBuilder() {
       <div class="row between"><p class="eyebrow" style="margin:0">Day ${ri + 1}</p><button class="btn primary" data-act="edit-routine" data-v="">Done</button></div>
       <div class="row"><label class="field grow">Day name<input id="dn-${ri}" data-in="day-name" data-r="${ri}" value="${esc(r.name)}" placeholder="Push"></label>
         <label class="field grow">Focus (optional)<input id="df-${ri}" data-in="day-focus" data-r="${ri}" value="${esc(r.focus || '')}" placeholder="Chest and triceps"></label></div>
-      ${rows || '<p class="small muted" style="margin:0">No exercises yet.</p>'}
+      ${rows || '<p class="small muted" style="margin:0">No exercises yet. Add some, a timer, or both.</p>'}
       <button class="btn block" data-act="pick-open" data-r="${ri}">+ Add exercise</button>
+      ${dayTimerEditor(r, ri)}
       <div class="row" style="flex-wrap:wrap">
         <button class="btn" data-act="day-move" data-r="${ri}" data-v="-1" ${ri ? '' : 'disabled'}>Move earlier</button>
         <button class="btn" data-act="day-move" data-r="${ri}" data-v="1" ${ri < P.routines.length - 1 ? '' : 'disabled'}>Move later</button>

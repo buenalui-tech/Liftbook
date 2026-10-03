@@ -24,6 +24,10 @@ function caloriesFor(w) {
   const kg = bodyWeightKgAt(w.startedAt), hours = ((w.endedAt || w.startedAt) - w.startedAt) / 3600000;
   if (!kg || !(hours > 0)) return null;
   let met = STRENGTH_MET * effortFactor(w.rpe);
+  if (!isActivity(w) && w.conditioning && w.conditioning.secs > 0) {
+    const part = Math.min(1, w.conditioning.secs / 3600 / hours);
+    met = (STRENGTH_MET * (1 - part) + ACTIVITY_MET.hiit * part) * effortFactor(w.rpe);
+  }
   if (isActivity(w)) {
     met = (ACTIVITY_MET[w.type] || 5) * effortFactor(w.rpe);
     // ACSM walking/running equations, incline included, where pace is known (metres per minute)

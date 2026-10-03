@@ -25,7 +25,7 @@ const A = {
   finish: () => finishWorkout(),
   discard: () => { if (!arm('discard')) return; disarm(); discardWorkout(); },
   'sheet-close': () => { S.sheet = null; disarm(); render(); },
-  scrim: (d, ev) => { if (S.sheet && S.sheet.edit) return;   // don't drop unsaved edits on a stray tap
+  scrim: (d, ev) => { if (S.sheet && (S.sheet.edit || S.sheet.type === 'timer-setup')) return;   // don't drop unsaved edits on a stray tap
     if (ev.target.classList.contains('scrim')) { S.sheet = null; disarm(); render(); } },
   'add-ex-open': () => { S.sheet = {type:'add-ex', q:''}; render(); },
   'add-ex': d => { const ex = libraryExercises().find(x => x.id === d.v); if (!ex) return; S.active.exercises.push(buildEx(ex)); S.sheet = null; saveActiveSoon(); render(); window.scrollTo(0, document.body.scrollHeight); },
@@ -71,12 +71,35 @@ const A = {
     else if (d.t === 'timer' && S.timer && S.timer.done) set(S.timer.done);
     render();
   },
-  'timer-setup': () => { if (S.timer) { S.screen = 'timer'; render(); return; } S.sheet = {type: 'timer-setup', kind: 'intervals', vals: {work: 20, rest: 10, rounds: 8, minutes: 12, cap: 0, exText: ''}}; render(); },
+  'timer-setup': () => { if (S.timer) { S.screen = 'timer'; render(); return; } openTimerSheet(null); },
   'mobility-setup': () => { if (S.timer) { S.screen = 'timer'; render(); return; } S.sheet = {type: 'mobility-setup', hold: 0}; render(); },
   'ts-kind': d => { S.sheet.kind = d.v; render(); },
   'ts-preset': d => { Object.assign(S.sheet.vals, JSON.parse(d.v)); render(); },
-  'ts-recent': d => { const r = (S.profile.recentTimers || []).filter(x => x.kind !== 'mobility')[+d.v]; if (r) Timer.start(r); },
-  'ts-start': () => { const spec = timerSpecFromSheet(); if (spec.err) { toast(spec.err); return; } Timer.start(spec); },
+  'ts-recent': d => { const r = (S.profile.recentTimers || []).filter(x => x.kind !== 'mobility')[+d.v]; if (r) { Object.assign(S.sheet, specToSheet(r)); render(); } },
+  'ts-level': d => { S.sheet.vals.steps[+d.i].level = d.v; render(); },
+  'ts-step-add': () => { const st = S.sheet.vals.steps, last = st[st.length - 1]; st.push({label: '', secs: last ? last.secs : 30, level: last && last.level === 'easy' ? 'hard' : 'easy', target: ''}); render(); },
+  'ts-step-rm': d => { const st = S.sheet.vals.steps; if (st.length > 1) { st.splice(+d.i, 1); render(); } },
+  'ts-saveday': () => { S.sheet.saveDay = !S.sheet.saveDay; },
+  'ts-start': () => {
+    const sh = S.sheet, spec = timerSpecFromSheet(); if (spec.err) { toast(spec.err); return; }
+    const rt = sh.forStart && S.program ? S.program.routines.find(r => r.id === sh.forStart) : null;
+    if (rt && sh.saveDay) { rt.timer = spec; store.saveProgram(); }
+    Timer.start(spec, sh.attach ? {attach: true} : rt ? {routineId: rt.id, routineName: rt.name} : {});
+  },
+  'ts-save-day': () => {
+    const spec = timerSpecFromSheet(); if (spec.err) { toast(spec.err); return; }
+    const rt = S.program && S.program.routines.find(r => r.id === S.sheet.forDay); if (!rt) return;
+    rt.timer = spec; store.saveProgram(); S.sheet = null; render(); toast(`Timer saved to ${rt.name}`);
+  },
+  'day-timer': d => { const rt = S.program.routines[+d.r]; openTimerSheet(rt.timer || null, {forDay: rt.id}); },
+  'day-timer-rm': d => { if (!arm('dtrm' + d.r)) return; disarm(); delete S.program.routines[+d.r].timer; store.saveProgram(); render(); toast('Timer removed'); },
+  'wk-timer': () => {
+    const a = S.active; if (!a) return;
+    const rt = S.program && a.routineId ? S.program.routines.find(r => r.id === a.routineId) : null;
+    openTimerSheet(a.conditioning ? a.conditioning.spec : rt && rt.timer || null, {attach: true});
+  },
+  'tm-adj': d => Timer.adjust(+d.v),
+  'tm-voice': () => { setSetting('voice', !setting('voice')); render(); if (setting('voice')) Voice.say('Spoken prompts on'); },
   'mob-hold': d => { S.sheet.hold = +d.v; render(); },
   'mob-start': d => { const r = MOBILITY[d.v]; if (r) Timer.start({kind: 'mobility', name: r.name, items: r.items, hold: S.sheet.hold || 0}); },
   'tm-pause': () => Timer.pause(),
@@ -253,8 +276,13 @@ document.addEventListener('input', ev => {
   } else if (k === 'ed-date') { S.sheet.edit.dateStr = el.value;
   } else if (k === 'ed-name') { S.sheet.edit.routineName = el.value;
   } else if (k === 'fb-msg') { S.sheet.msg = el.value;
-  } else if (k === 'ts') { const n = parseInt(el.value, 10); S.sheet.vals[el.dataset.k] = isNaN(n) ? null : n;
-  } else if (k === 'ts-ex') { S.sheet.vals.exText = el.value;
+  } else if (k === 'ts' || k === 'ts-step' || k === 'ts-name' || k === 'ts-ex') {
+    const v = S.sheet.vals;
+    if (k === 'ts') { const n = (el.dataset.k === 'warmup' || el.dataset.k === 'cooldown' ? parseFloat : parseInt)(el.value.replace(',', '.'), 10); v[el.dataset.k] = isNaN(n) ? null : n; }
+    else if (k === 'ts-step') { const s = v.steps[+el.dataset.i]; if (el.dataset.k === 'secs') { const n = parseInt(el.value, 10); s.secs = isNaN(n) ? null : n; } else s[el.dataset.k] = el.value; }
+    else if (k === 'ts-name') v.name = el.value;
+    else v.exText = el.value;
+    const tt = document.getElementById('ts-total'); if (tt) tt.textContent = timerSheetTotal();
   } else if (k === 'tm-notes') { if (S.timer && S.timer.done) S.timer.done.notes = el.value;
   } else if (k === 'tg-kcal' || k === 'tg-pct' || k === 'tg-gram') {
     const dr = S.sheet.draft, n = parseInt(el.value, 10);
@@ -323,7 +351,7 @@ async function importProgramFile(file) {
   try {
     const o = JSON.parse(await file.text()), p = o && o.program;
     if (!p || !Array.isArray(p.routines) || !p.routines.every(r => r && Array.isArray(r.exercises))) throw new Error('bad');
-    p.id = p.id || newId(); p.routines.forEach((r, i) => { r.id = r.id || newId(); r.name = r.name || `Day ${i + 1}`; r.tag = r.tag || tagFor(r.name); });
+    p.id = p.id || newId(); p.routines.forEach((r, i) => { r.id = r.id || newId(); r.name = r.name || `Day ${i + 1}`; r.tag = r.tag || tagFor(r.name); const tm = cleanSpec(r.timer); if (tm) r.timer = tm; else delete r.timer; });
     setProgram(p, `${p.name || 'Program'} imported`);
   } catch { toast('That file isn’t a Liftbook program.'); }
 }

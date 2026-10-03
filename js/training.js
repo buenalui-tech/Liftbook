@@ -90,8 +90,11 @@ function buildEx(ex) {
   };
 }
 function startWorkout(routineId) {
+  if (S.timer) { S.screen = 'timer'; render(); return; }
   if (S.active) { S.screen = 'workout'; render(); return; }
   const rt = S.program && S.program.routines.find(r => r.id === routineId); if (!rt) return;
+  // a timer-only day goes straight to its timer, ready to tweak for today
+  if (!rt.exercises.length && rt.timer) { openTimerSheet(rt.timer, {forStart: rt.id}); return; }
   S.active = {id:newId(), routineId:rt.id, routineName:rt.name, unit:unit(), startedAt:Date.now(), exercises: rt.exercises.map(buildEx)};
   S.screen = 'workout'; S.menuEx = null;
   store.saveActive(); render(); window.scrollTo(0, 0); wake();
@@ -121,7 +124,7 @@ function finishWorkout() {
   const a = S.active;
   const exercises = a.exercises.map(e => ({...e, hint: undefined, sets: e.sets.filter(s => s.done)})).filter(e => e.sets.length);
   exercises.forEach(e => delete e.hint);
-  if (!exercises.length) { toast('Complete at least one set, or discard the workout.'); return; }
+  if (!exercises.length && !a.conditioning) { toast('Complete at least one set, or discard the workout.'); return; }
   const w = {...a, exercises, endedAt: Date.now()};
   const prs = [];
   for (const e of exercises) {
