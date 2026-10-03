@@ -28,7 +28,7 @@ function loadApp(stored = {}, extra = {}) {
   vm.createContext(ctx);
   // top-level const/let live in the context's script scope; expose the names tests need
   const src = FILES.map(f => fs.readFileSync(new URL(`../js/${f}.js`, import.meta.url), 'utf8')).join('\n;\n') +
-    '\n;globalThis.T = {S, store, suggest, e1rm, niceTicks, weightSeries, weeklyRateKg, caloriesFor, improvements, recomputePRs, muscleLoad, musclesFor, tagFor, lastPerf, scanKg, conv, TEMPLATE, CATALOG, slug, startOfDay, fromUsda, fromOff, rankFoods, unitsFor, portionTotals, autoTargets, dayTotals, estimateBurn, targets, targetsFromBurn, computeTargets, nutritionPrefs, proposeTargets, applyCheckin, runAutoCheckin, checkinDue, copyMeal, foodLogs, viewToday, viewFood, viewProgress, viewBody, viewProgram, viewSheet, viewWorkout, startWorkout, viewSettings, buildPhases, Timer, viewTimer, viewTimerSetup, viewMobilitySetup, MOBILITY, viewTrainingLoad, sessionLoad, specFromVals, specToSheet, cleanSpec, specSecs, finishWorkout, timerOutline, viewTimerSetup, microFromUsda, microFromOff, entryMicro, viewMicros, Micro, fromUsda, TEMPLATE_COPY: () => JSON.parse(JSON.stringify(TEMPLATE))};';
+    '\n;globalThis.T = {S, store, suggest, e1rm, niceTicks, weightSeries, weeklyRateKg, caloriesFor, improvements, recomputePRs, muscleLoad, musclesFor, tagFor, lastPerf, scanKg, conv, TEMPLATE, CATALOG, slug, startOfDay, fromUsda, fromOff, rankFoods, unitsFor, portionTotals, autoTargets, dayTotals, estimateBurn, targets, targetsFromBurn, computeTargets, nutritionPrefs, proposeTargets, applyCheckin, runAutoCheckin, checkinDue, copyMeal, foodLogs, viewToday, viewFood, viewProgress, viewBody, viewProgram, viewSheet, viewWorkout, startWorkout, viewSettings, buildPhases, Timer, viewTimer, viewTimerSetup, viewMobilitySetup, MOBILITY, viewTrainingLoad, sessionLoad, specFromVals, specToSheet, cleanSpec, specSecs, finishWorkout, timerOutline, viewTimerSetup, microFromUsda, microFromOff, entryMicro, viewMicros, Micro, fromUsda, portionMicros, TEMPLATE_COPY: () => JSON.parse(JSON.stringify(TEMPLATE))};';
   vm.runInContext(src, ctx, {filename: 'liftbook.js'});
   return ctx.T;
 }
@@ -472,6 +472,13 @@ test('vitamins and minerals: read from USDA and labels, scaled by portion, and a
   const html = T.viewMicros();
   assert.ok(html.includes('Vitamins and minerals') && html.includes('Not enough data'), 'a nutrient from under half the day’s calories isn’t shown as a number');
   assert.ok(html.includes('1 of 2 foods logged list'), 'says how much of the log has data');
+  // the Food tab folds the same list away under the day's macros, and the portion sheet names the biggest wins
+  T.S.day = day; T.S.tab = 'food';
+  assert.ok(T.viewFood().includes('Fiber, vitamins and minerals'));
+  T.S.foodMicroOpen = true;
+  assert.ok(T.viewFood().includes('for everything logged so far'));
+  assert.equal(T.portionMicros(broc, 100, 100), '<span class="muted">Daily value:</span> Vitamin C 99% · Folate 16% · Fiber 9%');
+  assert.equal(T.portionMicros({...broc, micro: undefined}, 100, 100), '', 'nothing shown for foods without data');
   // foods logged before this existed are looked up once
   delete broc.micro;
   await T.Micro.backfill();

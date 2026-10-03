@@ -205,7 +205,9 @@ function viewFood() {
         : `<div><b class="num kcal-big">${fmtNum(tot.kcal)}</b> <span class="muted">kcal</span></div>
            <p class="small muted" style="margin:0">Log a weigh-in on the Body tab and Liftbook sets calorie and protein targets for you, or tap Set targets to enter your own.</p>`}
       ${macroBar('Protein', tot.p, tg && tg.p, 'g', 'p')}${macroBar('Carbs', tot.c, tg && tg.c, 'g', 'c')}${macroBar('Fat', tot.f, tg && tg.f, 'g', 'f')}
-      <div class="row between small muted"><span>Fiber ${Math.round(tot.fiber)} g</span><button class="btn edit-tg" data-act="targets-open">${tg ? 'Edit targets' : 'Set targets'}</button></div>
+      ${foodLogs(day).length ? `<details class="day-micros" id="food-micros" ${S.foodMicroOpen ? 'open' : ''}><summary><span>Fiber, vitamins and minerals</span><span class="row" style="gap:6px">${S.foodMicroOpen ? '' : `<span class="num muted">Fiber ${tot.fiber >= 10 ? Math.round(tot.fiber) : r1(tot.fiber)} g</span>`}<span class="chev" aria-hidden="true">›</span></span></summary>
+        ${S.foodMicroOpen ? microList(foodLogs(day), 1, true) : ''}</details>` : ''}
+      <div class="row small muted" style="justify-content:flex-end"><button class="btn edit-tg" data-act="targets-open">${tg ? 'Edit targets' : 'Set targets'}</button></div>
       ${learningNote()}
       <label class="row small partial-day"><input type="checkbox" data-act="day-incomplete" ${partial ? 'checked' : ''}> I didn’t log everything ${day === today ? 'today' : 'this day'}
         <span class="muted">(left out when Liftbook learns your burn)</span></label>
@@ -295,6 +297,7 @@ function viewPortion() {
     ${f.source === 'quick' ? '' : `<div class="row"><label class="field" style="width:110px">Amount<input id="po-qty" data-in="po-qty" inputmode="decimal" value="${esc(sh.qty)}"></label>
       <label class="field grow">Unit<select id="po-unit" data-in="po-unit">${units.map(u => `<option value="${u.id}" ${u.id === sh.unit ? 'selected' : ''}>${esc(u.label)}${u.grams && u.id !== 'g' && u.id !== 'oz' && !/\d\s*(g|ml)\b/i.test(u.label) ? ` (${r1(u.grams)} g)` : ''}</option>`).join('')}</select></label></div>`}
     <div class="stats" id="po-totals">${portionStats(totals, grams)}</div>
+    <p class="small" id="po-micros" style="margin:0">${portionMicros(f, grams, +sh.qty || 0)}</p>
     <div class="chips" role="group" aria-label="Meal">${MEALS.map(([m, l]) => `<button class="chipbtn" data-act="po-meal" data-v="${m}" aria-pressed="${sh.meal === m}">${l}</button>`).join('')}</div>
     <button class="btn primary lg block" data-act="portion-save">${sh.editId ? 'Save changes' : `Add to ${esc(mealLabel(sh.meal))}`}</button>
     ${sh.editId ? `<button class="btn danger block ${S.armed === 'fdel' ? 'armed' : ''}" data-act="food-del">${S.armed === 'fdel' ? 'Tap again to remove' : 'Remove from log'}</button>` : ''}`;
@@ -511,22 +514,37 @@ function viewMicros() {
   const end = startOfDay(Date.now()), days = [];
   for (let d = end - 6 * DAY; d <= end; d += DAY) { const day = startOfDay(d + 12 * 3600000); if (dayTotals(day).kcal >= ADAPT.partialDayKcal && !isIncompleteDay(day)) days.push(day); }
   if (!days.length) return '';
-  const logs = days.flatMap(foodLogs), kcalAll = logs.reduce((s, x) => s + (x.totals.kcal || 0), 0) || 1;
+  const logs = days.flatMap(foodLogs);
+  return `<section class="card micros"><details id="micro-details" ${S.microOpen ? 'open' : ''}>
+    <summary><span class="stack" style="gap:2px"><h3>Vitamins and minerals</h3><span class="small muted">Daily average, last ${days.length === 1 ? 'logged day' : `${days.length} logged days`}</span></span><span class="chev" aria-hidden="true">›</span></summary>
+    ${microList(logs, days.length)}</details></section>`;
+}
+// the list itself, shared by Progress (a week's average) and the Food tab (one day so far)
+function microList(logs, nDays, today) {
   if (logs.some(x => Micro.needs(x.food)) && !Micro.state) setTimeout(() => Micro.backfill(), 0);
+  const kcalAll = logs.reduce((s, x) => s + (x.totals.kcal || 0), 0) || 1;
   const row = ([k, name, u, dv]) => {
     let sum = 0, known = 0;
     for (const x of logs) { const v = entryMicro(x, k); if (v != null) { sum += v; known += x.totals.kcal || 0; } }
-    const avg = sum / days.length, pct = Math.round(avg / dv * 100), enough = known / kcalAll >= 0.5;
+    const avg = sum / nDays, pct = Math.round(avg / dv * 100), enough = known / kcalAll >= 0.5;
     const amt = avg >= 100 ? fmtNum(avg) : avg >= 10 ? Math.round(avg) : r1(avg);
     return `<div class="mi"><span class="mi-n">${name} <span class="muted">${enough ? `${amt} ${u}` : ''}</span></span>
       ${enough ? `<span class="mi-bar"><i style="width:${Math.min(100, pct)}%"></i></span><span class="mi-p num">${pct}%</span>` : '<span class="mi-na small muted">Not enough data</span>'}</div>`;
   };
   const withData = logs.filter(x => x.food && x.food.micro && Object.keys(x.food.micro).length >= 5).length;
-  return `<section class="card micros"><details id="micro-details" ${S.microOpen ? 'open' : ''}>
-    <summary><span class="stack" style="gap:2px"><h3>Vitamins and minerals</h3><span class="small muted">Daily average, last ${days.length === 1 ? 'logged day' : `${days.length} logged days`}</span></span><span class="chev" aria-hidden="true">›</span></summary>
-    <div class="stack" style="gap:6px;margin-top:10px">
+  return `<div class="stack" style="gap:6px;margin-top:10px">
       <p class="eyebrow" style="margin:0">Aim for</p>${MICROS.filter(m => !m[7]).map(row).join('')}
       <p class="eyebrow" style="margin:6px 0 0">Keep under</p>${MICROS.filter(m => m[7]).map(row).join('')}
-      <p class="small muted" style="margin:6px 0 0">% of the Daily Value on US food labels.${withData < logs.length ? ` ${withData} of ${logs.length} foods logged list their vitamins and minerals; packaged foods and quick adds often don’t, so your real intake is likely a bit higher.` : ''}${Micro.state === 'running' ? ' Adding details for foods you logged earlier…' : ''}</p>
-    </div></details></section>`;
+      <p class="small muted" style="margin:6px 0 0">% of the Daily Value on US food labels${today ? ', for everything logged so far' : ''}.${withData < logs.length ? ` ${withData} of ${logs.length} foods logged${today ? ' today' : ''} list their vitamins and minerals; packaged foods and quick adds often don’t, so your real intake is likely a bit higher.` : ''}${Micro.state === 'running' ? ' Adding details for foods you logged earlier…' : ''}</p>
+    </div>`;
+}
+// in the portion sheet: what this amount brings, the three biggest wins (and sodium when it's a lot)
+function portionMicros(f, grams, qty) {
+  const m = f.micro; if (!m || Object.keys(m).length < 3) return '';
+  const factor = f.per100 ? (grams || 0) / 100 : qty || 0; if (!(factor > 0)) return '';
+  const pct = ([k, , , dv]) => k === 'fiber' ? ((f.per100 || f.perServing || {}).fiber || 0) * factor / dv * 100 : m[k] != null ? m[k] * factor / dv * 100 : null;
+  const top = MICROS.filter(x => !x[7]).map(x => [x[1], pct(x)]).filter(x => x[1] >= 5).sort((a, b) => b[1] - a[1]).slice(0, 3);
+  const na = pct(MICROS.find(x => x[0] === 'na'));
+  const parts = [...top.map(([n, p]) => `${n} ${Math.round(p)}%`), na >= 15 ? `Sodium ${Math.round(na)}%` : ''].filter(Boolean);
+  return parts.length ? `<span class="muted">Daily value:</span> ${esc(parts.join(' · '))}` : '';
 }

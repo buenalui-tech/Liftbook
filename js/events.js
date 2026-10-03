@@ -310,6 +310,7 @@ document.addEventListener('input', ev => {
     if (k === 'po-qty') S.sheet.qty = el.value; else S.sheet.unit = el.value;
     const {grams, totals} = portionTotals(S.sheet.food, parseFloat(String(S.sheet.qty).replace(',', '.')) || 0, S.sheet.unit);
     const box = document.getElementById('po-totals'); if (box) box.innerHTML = portionStats(totals, grams);
+    const mi = document.getElementById('po-micros'); if (mi) mi.innerHTML = portionMicros(S.sheet.food, grams, parseFloat(String(S.sheet.qty).replace(',', '.')) || 0);
   } else if (k === 'prog-name') { S.program.name = el.value.trim() || 'My program'; saveProgramSoon();
   } else if (k === 'day-name') {
     const i = +el.dataset.r, r = S.program.routines[i]; r.name = el.value.trim() || `Day ${i + 1}`;
@@ -356,7 +357,8 @@ document.addEventListener('touchend', ev => {
   const t = ev.changedTouches[0], dx = t.clientX - swipe.x, dy = t.clientY - swipe.y; swipe = null;
   if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.5) stepDay(dx < 0 ? 1 : -1);
 }, {passive: true});
-document.addEventListener('toggle', ev => { if (ev.target.id === 'wt-details') S.wtOpen = ev.target.open; if (ev.target.id === 'micro-details') S.microOpen = ev.target.open; }, true);
+document.addEventListener('toggle', ev => { if (ev.target.id === 'wt-details') S.wtOpen = ev.target.open; if (ev.target.id === 'micro-details') S.microOpen = ev.target.open;
+  if (ev.target.id === 'food-micros' && S.foodMicroOpen !== ev.target.open) { S.foodMicroOpen = ev.target.open; render(); } }, true);
 async function importProgramFile(file) {
   try {
     const o = JSON.parse(await file.text()), p = o && o.program;
