@@ -78,12 +78,19 @@ function viewSettings() {
       ${toggle('autoRest', 'Start automatically', 'When you check off a set')}
       <div class="set-row"><span>Sound</span><div class="seg" role="group" aria-label="Rest timer sound">${Object.entries(SOUNDS).map(([k, s]) => `<button data-act="set-sound" data-v="${k}" aria-pressed="${sound === k}">${s.name}</button>`).join('')}</div></div>
       <div class="set-row ${sound === 'off' ? 'disabled' : ''}"><label for="set-volume">Volume</label>
-        <div class="row" style="gap:8px;flex:1;max-width:220px"><input type="range" id="set-volume" data-in="set-volume" min="0" max="1" step="0.05" value="${setting('volume')}" ${sound === 'off' ? 'disabled' : ''} aria-label="Rest timer volume"><button class="btn" data-act="sound-test" ${sound === 'off' ? 'disabled' : ''}>Test</button></div></div>
+        <div class="row" style="gap:8px;flex:1;max-width:220px"><input type="range" id="set-volume" data-in="set-volume" min="0" max="1" step="0.05" value="${setting('volume')}" ${sound === 'off' ? 'disabled' : ''} aria-label="Rest timer volume"></div></div>
       ${toggle('countdown', 'Countdown beeps', 'A tick in each of the last 3 seconds')}
       ${typeof window.speechSynthesis !== 'undefined' ? toggle('voice', 'Spoken prompts', 'The interval timer calls out each step, like “Sprint, all out, 30 seconds”') : ''}
       ${canVibrate() ? toggle('vibrate', 'Vibrate when rest ends') : ''}
       ${toggle('keepAwake', 'Keep screen on during workouts')}
-      <p class="small muted" style="margin:0">${isIOS() ? 'On iPhone, sounds follow your phone’s volume and are muted when the ringer switch is on silent. They also can’t play while the screen is locked; that needs the App Store version.' : 'Volume is relative to your phone’s media volume. Sounds can’t play while the screen is off.'}</p>
+      <div class="set-row"><span class="stack" style="gap:1px"><span>Sound check</span><span class="small muted">Plays the beep${typeof window.speechSynthesis !== 'undefined' && setting('voice') ? ' and the voice' : ''}</span></span><button class="btn" data-act="sound-test">Play</button></div>
+      ${S.soundCheck ? `<p class="small" style="margin:0">${esc(S.soundCheck)}</p>` : ''}
+      ${isIOS() ? `<div class="small muted stack" style="gap:4px"><b style="color:var(--ink)">Not hearing anything on iPhone?</b>
+        <span>1. Turn off Silent mode. Use the switch on the side of the phone (orange showing means silent), or on newer iPhones the Action button or the bell in Control Center. Web apps are muted in Silent mode even with the volume up.</span>
+        <span>2. Press the volume-up button while Sound check is playing. That sets the media volume, which is separate from the ringer.</span>
+        <span>3. If AirPods, other headphones or a speaker are connected, the sound plays there instead.</span>
+        <span>Sounds and the voice also stop while the screen is locked; that needs the App Store version.</span></div>`
+        : '<p class="small muted" style="margin:0">Volume is relative to your phone’s media volume. Sounds can’t play while the screen is off.</p>'}
     </section>
 
     <section class="card"><h3>Nutrition</h3>

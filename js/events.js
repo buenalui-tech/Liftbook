@@ -116,7 +116,17 @@ const A = {
   'set-theme': d => { setSetting('theme', d.v); render(); },
   'set-accent': d => { setSetting('accent', d.v); render(); },
   'set-sound': d => { setSetting('sound', d.v); render(); playSound(d.v); },
-  'sound-test': () => playSound(),
+  'sound-test': () => {
+    unlockAudio(); playSound(setting('sound') === 'off' ? 'beep' : setting('sound'), Math.max(setting('volume'), 0.5));
+    const spoke = typeof window.speechSynthesis !== 'undefined' && setting('voice') && Voice.say('Sound check. If you can hear this, the timer can talk to you.');
+    // what the phone reports, so a silent phone can be told apart from a bug
+    setTimeout(() => {
+      const st = audio ? audio.state : 'unavailable';
+      S.soundCheck = st === 'running' ? `The beep was played${spoke ? ' and the voice was sent' : ''}. Heard nothing? Your phone is muting it: see the steps below.`
+        : `Your phone hasn’t allowed sound yet (audio is ${st}). Tap Sound check again.`;
+      render();
+    }, 400);
+  },
   'set-toggle': d => { setSetting(d.v, !setting(d.v)); render(); },
   'ex-note': d => { S.noteOpen = {...(S.noteOpen || {}), [d.e]: !(S.noteOpen && S.noteOpen[d.e])}; render(); const t = document.getElementById('note-' + d.e); if (t) t.focus(); },
   'food-add': d => { S.sheet = {type: 'add-food', meal: d.v, mode: 'search', q: ''}; render(); const i = document.getElementById('food-q'); if (i) i.focus(); },

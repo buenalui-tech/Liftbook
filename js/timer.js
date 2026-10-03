@@ -138,7 +138,9 @@ const Voice = {
       const u = new SpeechSynthesisUtterance(text), v = this.pick();
       if (v) u.voice = v;
       u.rate = 1.05; u.volume = 1;
-      speechSynthesis.cancel(); speechSynthesis.speak(u);
+      // Safari can drop a phrase spoken in the same instant as cancel(), so only cancel when something is talking
+      if (speechSynthesis.speaking || speechSynthesis.pending) { speechSynthesis.cancel(); setTimeout(() => speechSynthesis.speak(u), 80); }
+      else speechSynthesis.speak(u);
       return true;
     } catch { return false; }
   }

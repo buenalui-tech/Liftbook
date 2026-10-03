@@ -151,7 +151,17 @@ function discardWorkout() {
 
 /* ---------- rest timer, sound, wake lock ---------- */
 let audio = null;
-function unlockAudio() { try { if (!audio) audio = new (window.AudioContext || window.webkitAudioContext)(); if (audio.state === 'suspended') audio.resume(); } catch {} }
+/* iPhone only lets a page make sound after a tap, and pauses ("interrupts") the audio after a call, another app's
+   music or a trip to the home screen. Every tap wakes it again, and the first one plays a silent sample to unlock it. */
+function unlockAudio() {
+  try {
+    if (!audio) {
+      audio = new (window.AudioContext || window.webkitAudioContext)();
+      const b = audio.createBufferSource(); b.buffer = audio.createBuffer(1, 1, 22050); b.connect(audio.destination); b.start(0);
+    }
+    if (audio.state !== 'running') audio.resume();
+  } catch {}
+}
 // rest is over: the chosen sound (see js/settings.js) and, where phones allow it, a buzz
 function beep() {
   try { if (setting('vibrate') && canVibrate()) navigator.vibrate([200, 100, 200]); } catch {}
