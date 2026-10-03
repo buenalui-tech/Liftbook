@@ -5,6 +5,7 @@
    {key, source: 'usda'|'off'|'custom'|'quick', sourceId, name, brand,
     per100: {kcal, p, c, f, fiber} | null,      // per 100 g, when the weight is known
     perServing: {kcal, p, c, f, fiber} | null,  // labels and quick adds that only know one serving
+    micro: {k, ca, …} | undefined,             // vitamins and minerals, on the same basis (see MICROS); only what the source reports
     servings: [{label, grams}]}                   // household measures ("1 banana", "1 cup")
    A logged entry keeps a copy of the food, so later database changes never rewrite past days. */
 const MEALS = [['breakfast', 'Breakfast'], ['lunch', 'Lunch'], ['dinner', 'Dinner'], ['snack', 'Snacks']];
@@ -23,7 +24,7 @@ function usdaNutrients(list) {
 function fromUsda(x) {
   const name = String(x.description || '').replace(/^./, ch => ch.toUpperCase());
   return {key: 'usda:' + x.fdcId, source: 'usda', sourceId: String(x.fdcId), name, brand: '', dataType: x.dataType,
-    per100: usdaNutrients(x.foodNutrients), perServing: null,
+    per100: usdaNutrients(x.foodNutrients), perServing: null, micro: microFromUsda(x.foodNutrients),
     servings: (x.foodMeasures || []).filter(m => m.gramWeight > 0 && !/not specified/i.test(m.disseminationText || ''))
       .map(m => ({label: m.disseminationText, grams: m.gramWeight})).slice(0, 4)};
 }
@@ -34,7 +35,7 @@ function fromOff(p) {
   if (kcal == null || !(p.product_name || p.generic_name)) return null;
   const sq = parseFloat(p.serving_quantity);
   return {key: 'off:' + p.code, source: 'off', sourceId: String(p.code), name: p.product_name || p.generic_name, brand: String(p.brands || '').split(',')[0].trim(),
-    per100: {kcal: +kcal || 0, p: +n.proteins_100g || 0, c: +n.carbohydrates_100g || 0, f: +n.fat_100g || 0, fiber: +n.fiber_100g || 0}, perServing: null,
+    per100: {kcal: +kcal || 0, p: +n.proteins_100g || 0, c: +n.carbohydrates_100g || 0, f: +n.fat_100g || 0, fiber: +n.fiber_100g || 0}, perServing: null, micro: microFromOff(n),
     servings: sq > 0 ? [{label: p.serving_size ? String(p.serving_size).trim() : '1 serving', grams: sq}] : []};
 }
 async function fetchJSON(url, tries = 2) {
@@ -436,4 +437,96 @@ function saveTargets() {
   if (!t) { toast('Log a weigh-in first, or choose “My own number”.'); return; }
   S.profile.nutrition = {kcalMode: d.kcalMode, kcal: d.kcal, split: d.split, pct: d.pct, grams: d.split === 'grams' ? d.grams : null};
   store.saveProfile(); S.sheet = null; render(); toast(`Targets saved: ${fmtNum(t.kcal)} kcal`);
+}
+
+/* ---------- vitamins and minerals ----------
+   A short list that matters for most people, against the Daily Values on US food labels (FDA, adults).
+   [key, name, unit, daily value, USDA nutrient numbers, Open Food Facts field, OFF grams → unit, upper limit?] */
+const MICROS = [
+  ['fiber', 'Fiber', 'g', 28],
+  ['k', 'Potassium', 'mg', 4700, ['306'], 'potassium', 1e3],
+  ['ca', 'Calcium', 'mg', 1300, ['301'], 'calcium', 1e3],
+  ['mg', 'Magnesium', 'mg', 420, ['304'], 'magnesium', 1e3],
+  ['fe', 'Iron', 'mg', 18, ['303'], 'iron', 1e3],
+  ['zn', 'Zinc', 'mg', 11, ['309'], 'zinc', 1e3],
+  ['va', 'Vitamin A', 'µg', 900, ['320'], 'vitamin-a', 1e6],
+  ['vc', 'Vitamin C', 'mg', 90, ['401'], 'vitamin-c', 1e3],
+  ['vd', 'Vitamin D', 'µg', 20, ['328'], 'vitamin-d', 1e6],
+  ['b12', 'Vitamin B12', 'µg', 2.4, ['418'], 'vitamin-b12', 1e6],
+  ['fol', 'Folate', 'µg', 400, ['435', '417'], 'vitamin-b9', 1e6],
+  ['na', 'Sodium', 'mg', 2300, ['307'], 'sodium', 1e3, true],
+  ['sf', 'Saturated fat', 'g', 20, ['606'], 'saturated-fat', 1, true]
+];
+// search results carry nutrientNumber/value; the by-id lookup carries number/amount
+function microFromUsda(list) {
+  const by = {}; for (const n of list || []) { const num = n.nutrientNumber || n.number, v = n.value ?? n.amount; if (num && v != null) by[num] = +v; }
+  const m = {}; for (const [k, , , , nums] of MICROS) if (nums) { const num = nums.find(x => by[x] != null); if (num) m[k] = by[num]; }
+  return m;
+}
+function microFromOff(n) {
+  const m = {}; for (const [k, , , , , off, scale] of MICROS) if (off && n && n[off + '_100g'] != null && !isNaN(+n[off + '_100g'])) m[k] = +n[off + '_100g'] * scale;
+  return m;
+}
+// one logged entry's amount of a nutrient, or null when its food doesn't report it
+function entryMicro(x, k) {
+  if (k === 'fiber') return x.food && x.food.source === 'quick' ? null : x.totals.fiber || 0;
+  const m = x.food && x.food.micro; if (!m || m[k] == null) return null;
+  return x.grams ? m[k] * x.grams / 100 : m[k] * (x.qty || 1);
+}
+/* Foods logged before this existed only kept calories and macros: look them up again once, quietly. */
+const Micro = {
+  state: null,
+  needs: f => f && !f.micro && (f.source === 'usda' || f.source === 'off') && f.sourceId,
+  async backfill() {
+    if (this.state) return; this.state = 'running';
+    try {
+      const since = startOfDay(Date.now()) - 30 * DAY, slots = [];
+      for (const x of S.food) {
+        if (x.kind === 'log' && x.date >= since && this.needs(x.food)) slots.push([x, x.food]);
+        if (x.kind === 'meal') for (const it of x.items || []) if (this.needs(it.food)) slots.push([x, it.food]);
+      }
+      if (!slots.length) { this.state = 'done'; return; }
+      const found = {};
+      const usda = [...new Set(slots.filter(s => s[1].source === 'usda').map(s => s[1].sourceId))];
+      for (let i = 0; i < usda.length; i += 20) {
+        const d = await fetchJSON(`https://api.nal.usda.gov/fdc/v1/foods?api_key=${encodeURIComponent(usdaKey())}&format=abridged&fdcIds=${usda.slice(i, i + 20).join(',')}`, 3);
+        if (Array.isArray(d)) for (const f of d) found['usda:' + f.fdcId] = microFromUsda(f.foodNutrients);
+      }
+      const off = [...new Set(slots.filter(s => s[1].source === 'off').map(s => s[1].sourceId))].slice(0, 40);
+      for (const code of off) {
+        const d = await fetchJSON(`https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(code)}.json?fields=code,nutriments`, 1);
+        if (d && d.status === 1) found['off:' + code] = microFromOff(d.product && d.product.nutriments);
+      }
+      const changed = new Set();
+      for (const [owner, food] of slots) { const m = found[food.source + ':' + food.sourceId]; if (m) { food.micro = m; changed.add(owner); } }
+      for (const o of changed) store.saveFood(o);
+    } catch {}
+    this.state = 'done';
+    if (S.tab === 'progress' && S.screen === 'tabs') render();
+  }
+};
+/* Progress: daily averages over the last week of fully logged days. Folded away by default; no flags, just
+   the numbers next to the label values, and an honest note about foods that don't report them. */
+function viewMicros() {
+  const end = startOfDay(Date.now()), days = [];
+  for (let d = end - 6 * DAY; d <= end; d += DAY) { const day = startOfDay(d + 12 * 3600000); if (dayTotals(day).kcal >= ADAPT.partialDayKcal && !isIncompleteDay(day)) days.push(day); }
+  if (!days.length) return '';
+  const logs = days.flatMap(foodLogs), kcalAll = logs.reduce((s, x) => s + (x.totals.kcal || 0), 0) || 1;
+  if (logs.some(x => Micro.needs(x.food)) && !Micro.state) setTimeout(() => Micro.backfill(), 0);
+  const row = ([k, name, u, dv]) => {
+    let sum = 0, known = 0;
+    for (const x of logs) { const v = entryMicro(x, k); if (v != null) { sum += v; known += x.totals.kcal || 0; } }
+    const avg = sum / days.length, pct = Math.round(avg / dv * 100), enough = known / kcalAll >= 0.5;
+    const amt = avg >= 100 ? fmtNum(avg) : avg >= 10 ? Math.round(avg) : r1(avg);
+    return `<div class="mi"><span class="mi-n">${name} <span class="muted">${enough ? `${amt} ${u}` : ''}</span></span>
+      ${enough ? `<span class="mi-bar"><i style="width:${Math.min(100, pct)}%"></i></span><span class="mi-p num">${pct}%</span>` : '<span class="mi-na small muted">Not enough data</span>'}</div>`;
+  };
+  const withData = logs.filter(x => x.food && x.food.micro && Object.keys(x.food.micro).length >= 5).length;
+  return `<section class="card micros"><details id="micro-details" ${S.microOpen ? 'open' : ''}>
+    <summary><span class="stack" style="gap:2px"><h3>Vitamins and minerals</h3><span class="small muted">Daily average, last ${days.length === 1 ? 'logged day' : `${days.length} logged days`}</span></span><span class="chev" aria-hidden="true">›</span></summary>
+    <div class="stack" style="gap:6px;margin-top:10px">
+      <p class="eyebrow" style="margin:0">Aim for</p>${MICROS.filter(m => !m[7]).map(row).join('')}
+      <p class="eyebrow" style="margin:6px 0 0">Keep under</p>${MICROS.filter(m => m[7]).map(row).join('')}
+      <p class="small muted" style="margin:6px 0 0">% of the Daily Value on US food labels.${withData < logs.length ? ` ${withData} of ${logs.length} foods logged list their vitamins and minerals; packaged foods and quick adds often don’t, so your real intake is likely a bit higher.` : ''}${Micro.state === 'running' ? ' Adding details for foods you logged earlier…' : ''}</p>
+    </div></details></section>`;
 }

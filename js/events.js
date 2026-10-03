@@ -356,7 +356,7 @@ document.addEventListener('touchend', ev => {
   const t = ev.changedTouches[0], dx = t.clientX - swipe.x, dy = t.clientY - swipe.y; swipe = null;
   if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.5) stepDay(dx < 0 ? 1 : -1);
 }, {passive: true});
-document.addEventListener('toggle', ev => { if (ev.target.id === 'wt-details') S.wtOpen = ev.target.open; }, true);
+document.addEventListener('toggle', ev => { if (ev.target.id === 'wt-details') S.wtOpen = ev.target.open; if (ev.target.id === 'micro-details') S.microOpen = ev.target.open; }, true);
 async function importProgramFile(file) {
   try {
     const o = JSON.parse(await file.text()), p = o && o.program;

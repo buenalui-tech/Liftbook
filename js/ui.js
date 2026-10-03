@@ -479,6 +479,7 @@ function viewProgress() {
     <section class="card"><div class="stack"><h3>Sets per muscle, last 7 days</h3><span class="small muted">The green band marks 10–20 hard sets a week, a common range for growth.</span></div>${bars}</section>
     ${viewTrainingLoad()}
     ${viewNutritionProgress()}
+    ${viewMicros()}
     ${viewAllWorkouts()}`;
 }
 /* month calendar: blue dot = lifting, green dot = activity; tap a day to see what was logged */

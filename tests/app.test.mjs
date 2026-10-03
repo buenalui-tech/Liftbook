@@ -28,7 +28,7 @@ function loadApp(stored = {}, extra = {}) {
   vm.createContext(ctx);
   // top-level const/let live in the context's script scope; expose the names tests need
   const src = FILES.map(f => fs.readFileSync(new URL(`../js/${f}.js`, import.meta.url), 'utf8')).join('\n;\n') +
-    '\n;globalThis.T = {S, store, suggest, e1rm, niceTicks, weightSeries, weeklyRateKg, caloriesFor, improvements, recomputePRs, muscleLoad, musclesFor, tagFor, lastPerf, scanKg, conv, TEMPLATE, CATALOG, slug, startOfDay, fromUsda, fromOff, rankFoods, unitsFor, portionTotals, autoTargets, dayTotals, estimateBurn, targets, targetsFromBurn, computeTargets, nutritionPrefs, proposeTargets, applyCheckin, runAutoCheckin, checkinDue, copyMeal, foodLogs, viewToday, viewFood, viewProgress, viewBody, viewProgram, viewSheet, viewWorkout, startWorkout, viewSettings, buildPhases, Timer, viewTimer, viewTimerSetup, viewMobilitySetup, MOBILITY, viewTrainingLoad, sessionLoad, specFromVals, specToSheet, cleanSpec, specSecs, finishWorkout, timerOutline, viewTimerSetup, TEMPLATE_COPY: () => JSON.parse(JSON.stringify(TEMPLATE))};';
+    '\n;globalThis.T = {S, store, suggest, e1rm, niceTicks, weightSeries, weeklyRateKg, caloriesFor, improvements, recomputePRs, muscleLoad, musclesFor, tagFor, lastPerf, scanKg, conv, TEMPLATE, CATALOG, slug, startOfDay, fromUsda, fromOff, rankFoods, unitsFor, portionTotals, autoTargets, dayTotals, estimateBurn, targets, targetsFromBurn, computeTargets, nutritionPrefs, proposeTargets, applyCheckin, runAutoCheckin, checkinDue, copyMeal, foodLogs, viewToday, viewFood, viewProgress, viewBody, viewProgram, viewSheet, viewWorkout, startWorkout, viewSettings, buildPhases, Timer, viewTimer, viewTimerSetup, viewMobilitySetup, MOBILITY, viewTrainingLoad, sessionLoad, specFromVals, specToSheet, cleanSpec, specSecs, finishWorkout, timerOutline, viewTimerSetup, microFromUsda, microFromOff, entryMicro, viewMicros, Micro, fromUsda, TEMPLATE_COPY: () => JSON.parse(JSON.stringify(TEMPLATE))};';
   vm.runInContext(src, ctx, {filename: 'liftbook.js'});
   return ctx.T;
 }
@@ -450,4 +450,31 @@ test('program: a timer-only day opens its timer; a finisher saves inside the lif
   const w = T.S.workouts.find(x => x.conditioning);
   assert.ok(w && w.exercises.length === 1, 'saved as one session with the lifts and the timer');
   assert.ok(T.viewToday().length > 50);
+});
+
+test('vitamins and minerals: read from USDA and labels, scaled by portion, and averaged honestly', async () => {
+  const usdaList = [{nutrientNumber: '306', value: 316}, {nutrientNumber: '401', value: 89.2}, {nutrientNumber: '417', value: 63}, {nutrientNumber: '307', value: 33}, {nutrientNumber: '301', value: 47}];
+  const fetched = [];
+  const fetch = async url => { fetched.push(url); return {ok: true, status: 200, json: async () => [{fdcId: 170379, foodNutrients: usdaList.map(n => ({number: n.nutrientNumber, amount: n.value}))}]}; };
+  const T = loadApp({}, {fetch});
+  const m = T.microFromUsda(usdaList);
+  assert.equal(m.k, 316); assert.equal(m.vc, 89.2); assert.equal(m.fol, 63, 'folate falls back to the total when DFE is missing');
+  assert.equal(m.vd, undefined, 'only what the source reports');
+  assert.equal(T.microFromOff({sodium_100g: 0.4, 'vitamin-d_100g': 0.000005}).na, 400);
+  assert.equal(Math.round(T.microFromOff({'vitamin-d_100g': 0.000005}).vd), 5);
+  // 250 g of broccoli = 2.5 × the per-100 g values; a quick add has no data rather than zero
+  const broc = {key: 'usda:170379', source: 'usda', sourceId: '170379', name: 'Broccoli', per100: {kcal: 34, p: 2.8, c: 6.6, f: 0.4, fiber: 2.6}, micro: m};
+  const day = T.startOfDay(Date.now());
+  T.S.food = [{id: 'b', kind: 'log', date: day + 1, meal: 'lunch', food: broc, qty: 250, unit: 'g', grams: 250, totals: {kcal: 85, p: 7, c: 16.5, f: 1, fiber: 6.5}},
+    {id: 'q', kind: 'log', date: day + 2, meal: 'lunch', food: {key: 'quick:1', source: 'quick'}, qty: 1, totals: {kcal: 2000, p: 150, c: 200, f: 70, fiber: 0}}];
+  assert.equal(T.entryMicro(T.S.food[0], 'vc'), 223);
+  assert.equal(T.entryMicro(T.S.food[1], 'vc'), null);
+  const html = T.viewMicros();
+  assert.ok(html.includes('Vitamins and minerals') && html.includes('Not enough data'), 'a nutrient from under half the day’s calories isn’t shown as a number');
+  assert.ok(html.includes('1 of 2 foods logged list'), 'says how much of the log has data');
+  // foods logged before this existed are looked up once
+  delete broc.micro;
+  await T.Micro.backfill();
+  assert.equal(fetched.length, 1); assert.ok(fetched[0].includes('fdcIds=170379'));
+  assert.equal(T.S.food[0].food.micro.k, 316);
 });

@@ -394,5 +394,16 @@ textarea.note-in{width:100%;border:1px solid var(--line);border-radius:8px;backg
 .tm-fill{height:100%;background:var(--lv);width:0}
 .tm-plus{min-height:84px;font-family:var(--display);font-size:30px;text-transform:uppercase;border-radius:18px}
 .tm-controls{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+/* vitamins and minerals (Progress) */
+.micros summary{display:flex;justify-content:space-between;align-items:center;cursor:pointer;list-style:none}
+.micros summary::-webkit-details-marker{display:none}
+.micros .chev{font-size:22px;color:var(--muted);transition:transform .15s}
+.micros details[open] .chev{transform:rotate(90deg)}
+.mi{display:grid;grid-template-columns:1fr 88px 42px;gap:10px;align-items:center;min-height:28px;font-size:15px}
+.mi-n .muted{font-size:13px}
+.mi-bar{height:6px;border-radius:3px;background:var(--sunk);overflow:hidden}
+.mi-bar i{display:block;height:100%;background:var(--accent);border-radius:3px}
+.mi-p{text-align:right;font-family:var(--display);font-weight:600;color:var(--muted)}
+.mi-na{grid-column:2/4;text-align:right}
 .toast{position:fixed;left:50%;transform:translateX(-50%);top:calc(12px + env(safe-area-inset-top,0px));z-index:20;background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:10px;font-weight:600;font-size:14px;max-width:calc(100% - 32px)}
 @media (prefers-reduced-motion: no-preference){.set.done{transition:background .2s}.rest .fill{transition:width .25s linear}}
