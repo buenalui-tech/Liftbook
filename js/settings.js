@@ -106,6 +106,8 @@ function viewSettings() {
       <p class="small muted" style="margin:0">Past workouts keep the unit they were logged in and are converted for display.</p>
     </section>
 
+    ${viewScaleSettings()}
+
     ${viewAccount()}
 
     <section class="card"><h3>Backups</h3>

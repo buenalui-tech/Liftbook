@@ -260,6 +260,7 @@ function viewAddFood() {
       <button class="btn primary block" data-act="quick-save">Add to ${esc(mealLabel(sh.meal))}</button>`;
   }
   return `<div class="row between"><h2>Add to ${esc(mealLabel(sh.meal))}</h2><button class="iconbtn" data-act="sheet-close" aria-label="Close">✕</button></div>
+    ${sh.plate ? `<div class="banner small">${ICON_SCALE} Scale zeroed. Put the next food on the plate and pick it below, or close when you’re done.</div>` : ''}
     <div class="seg tabs4" role="tablist">${tabs.map(([k, l]) => `<button data-act="food-mode" data-v="${k}" aria-pressed="${mode === k}">${l}</button>`).join('')}</div>
     ${body}`;
 }
@@ -288,18 +289,22 @@ function openPortion(food, meal, existing) {
   const units = unitsFor(food), last = existing || recentFoods(60).find(x => x.food.key === food.key)?.last;
   const unitId = last && units.some(u => u.id === last.unit) ? last.unit : units[0].id;
   S.sheet = {type: 'portion', food, meal: existing ? existing.meal : meal, qty: last ? last.qty : (units[0].id === 'g' ? 100 : 1), unit: unitId, editId: existing ? existing.id : null, back: S.sheet};
+  // weighing a plate: the next food goes straight onto the scale
+  if (S.sheet.back && S.sheet.back.plate && Scale.status === 'on' && food.per100) Object.assign(S.sheet, {weigh: true, unit: 'g', qty: Math.max(0, Math.round(Scale.grams() || 0))});
   render();
 }
 function viewPortion() {
   const sh = S.sheet, f = sh.food, units = unitsFor(f), {grams, totals} = portionTotals(f, +sh.qty || 0, sh.unit);
   return `<div class="row between"><h2>${sh.editId ? 'Edit food' : 'Add food'}</h2><button class="iconbtn" data-act="${sh.editId ? 'sheet-close' : 'portion-back'}" aria-label="Back">✕</button></div>
     <div class="stack" style="gap:2px"><b>${esc(f.name)}</b><span class="small muted">${esc([f.brand, f.source === 'usda' ? 'USDA FoodData Central' : f.source === 'off' ? 'Open Food Facts' : f.source === 'quick' ? 'Quick add' : 'My food'].filter(Boolean).join(' · '))}</span></div>
-    ${f.source === 'quick' ? '' : `<div class="row"><label class="field" style="width:110px">Amount<input id="po-qty" data-in="po-qty" inputmode="decimal" value="${esc(sh.qty)}"></label>
-      <label class="field grow">Unit<select id="po-unit" data-in="po-unit">${units.map(u => `<option value="${u.id}" ${u.id === sh.unit ? 'selected' : ''}>${esc(u.label)}${u.grams && u.id !== 'g' && u.id !== 'oz' && !/\d\s*(g|ml)\b/i.test(u.label) ? ` (${r1(u.grams)} g)` : ''}</option>`).join('')}</select></label></div>`}
+    ${f.source === 'quick' ? '' : sh.weigh && Scale.status === 'on' ? weighBlock(sh) : `<div class="row"><label class="field" style="width:110px">Amount<input id="po-qty" data-in="po-qty" inputmode="decimal" value="${esc(sh.qty)}"></label>
+      <label class="field grow">Unit<select id="po-unit" data-in="po-unit">${units.map(u => `<option value="${u.id}" ${u.id === sh.unit ? 'selected' : ''}>${esc(u.label)}${u.grams && u.id !== 'g' && u.id !== 'oz' && !/\d\s*(g|ml)\b/i.test(u.label) ? ` (${r1(u.grams)} g)` : ''}</option>`).join('')}</select></label></div>
+      ${weighBlock(sh)}`}
     <div class="stats" id="po-totals">${portionStats(totals, grams)}</div>
     <p class="small" id="po-micros" style="margin:0">${portionMicros(f, grams, +sh.qty || 0)}</p>
     <div class="chips" role="group" aria-label="Meal">${MEALS.map(([m, l]) => `<button class="chipbtn" data-act="po-meal" data-v="${m}" aria-pressed="${sh.meal === m}">${l}</button>`).join('')}</div>
     <button class="btn primary lg block" data-act="portion-save">${sh.editId ? 'Save changes' : `Add to ${esc(mealLabel(sh.meal))}`}</button>
+    ${sh.weigh && Scale.status === 'on' && !sh.editId ? '<button class="btn block" data-act="portion-save-next">Add, then weigh the next food</button>' : ''}
     ${sh.editId ? `<button class="btn danger block ${S.armed === 'fdel' ? 'armed' : ''}" data-act="food-del">${S.armed === 'fdel' ? 'Tap again to remove' : 'Remove from log'}</button>` : ''}`;
 }
 const portionStats = (t, grams) => `<div class="stat"><b class="num">${fmtNum(t.kcal)}</b><span>kcal${grams ? ` · ${fmtNum(grams)} g` : ''}</span></div>

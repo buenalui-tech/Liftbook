@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 
-const FILES = ['core', 'training', 'ui', 'program', 'body', 'food', 'adaptive', 'figure', 'share', 'tester', 'settings', 'timer', 'events'];
+const FILES = ['core', 'training', 'ui', 'program', 'body', 'food', 'scale', 'adaptive', 'figure', 'share', 'tester', 'settings', 'timer', 'events'];
 const DAY = 86400000;
 
 function loadApp(stored = {}, extra = {}) {
@@ -17,7 +17,7 @@ function loadApp(stored = {}, extra = {}) {
     createElement: el, head: el(), body: el(), documentElement: {dataset: {}}, fonts: {ready: Promise.resolve()}, visibilityState: 'visible', activeElement: null};
   const ctx = {
     console, Math, Date, JSON, Promise, Set, Map, Array, Object, String, Number, Boolean, RegExp, Error, Float32Array, Float64Array, Int16Array, isNaN, parseFloat, parseInt,
-    setTimeout: () => 0, clearTimeout() {}, setInterval: () => 0, requestAnimationFrame: () => 0, cancelAnimationFrame() {},
+    setTimeout: () => 0, clearTimeout() {}, setInterval: () => 0, clearInterval() {}, requestAnimationFrame: () => 0, cancelAnimationFrame() {},
     document, location: {protocol: 'file:', href: 'file:///'}, performance: {now: () => 0},
     navigator: {onLine: true, userAgent: 'node', maxTouchPoints: 0},
     localStorage: {getItem: k => store.has(k) ? store.get(k) : null, setItem: (k, v) => store.set(k, String(v)), removeItem: k => store.delete(k)},
@@ -28,7 +28,7 @@ function loadApp(stored = {}, extra = {}) {
   vm.createContext(ctx);
   // top-level const/let live in the context's script scope; expose the names tests need
   const src = FILES.map(f => fs.readFileSync(new URL(`../js/${f}.js`, import.meta.url), 'utf8')).join('\n;\n') +
-    '\n;globalThis.T = {S, store, suggest, e1rm, niceTicks, weightSeries, weeklyRateKg, caloriesFor, improvements, recomputePRs, muscleLoad, musclesFor, tagFor, lastPerf, scanKg, conv, TEMPLATE, CATALOG, slug, startOfDay, fromUsda, fromOff, rankFoods, unitsFor, portionTotals, autoTargets, dayTotals, estimateBurn, targets, targetsFromBurn, computeTargets, nutritionPrefs, proposeTargets, applyCheckin, runAutoCheckin, checkinDue, copyMeal, foodLogs, viewToday, viewFood, viewProgress, viewBody, viewProgram, viewSheet, viewWorkout, startWorkout, viewSettings, buildPhases, Timer, viewTimer, viewTimerSetup, viewMobilitySetup, MOBILITY, viewTrainingLoad, sessionLoad, specFromVals, specToSheet, cleanSpec, specSecs, finishWorkout, timerOutline, viewTimerSetup, microFromUsda, microFromOff, entryMicro, viewMicros, Micro, fromUsda, portionMicros, TEMPLATE_COPY: () => JSON.parse(JSON.stringify(TEMPLATE))};';
+    '\n;globalThis.T = {S, store, suggest, e1rm, niceTicks, weightSeries, weeklyRateKg, caloriesFor, improvements, recomputePRs, muscleLoad, musclesFor, tagFor, lastPerf, scanKg, conv, TEMPLATE, CATALOG, slug, startOfDay, fromUsda, fromOff, rankFoods, unitsFor, portionTotals, autoTargets, dayTotals, estimateBurn, targets, targetsFromBurn, computeTargets, nutritionPrefs, proposeTargets, applyCheckin, runAutoCheckin, checkinDue, copyMeal, foodLogs, viewToday, viewFood, viewProgress, viewBody, viewProgram, viewSheet, viewWorkout, startWorkout, viewSettings, buildPhases, Timer, viewTimer, viewTimerSetup, viewMobilitySetup, MOBILITY, viewTrainingLoad, sessionLoad, specFromVals, specToSheet, cleanSpec, specSecs, finishWorkout, timerOutline, viewTimerSetup, microFromUsda, microFromOff, entryMicro, viewMicros, Micro, fromUsda, portionMicros, Scale, esnParse, esnPacket, openPortion, viewPortion, A, viewSettings, TEMPLATE_COPY: () => JSON.parse(JSON.stringify(TEMPLATE))};';
   vm.runInContext(src, ctx, {filename: 'liftbook.js'});
   return ctx.T;
 }
@@ -484,4 +484,40 @@ test('vitamins and minerals: read from USDA and labels, scaled by portion, and a
   await T.Micro.backfill();
   assert.equal(fetched.length, 1); assert.ok(fetched[0].includes('fdcIds=170379'));
   assert.equal(T.S.food[0].food.micro.k, 316);
+});
+
+test('food scale: Etekcity packets, live grams into the portion, zero, and weighing a whole plate', () => {
+  const T = loadApp();
+  const hex = s => new Uint8Array(s.match(/../g).map(x => parseInt(x, 16)));
+  // known samples from the ESN00 write-up
+  assert.equal(JSON.stringify(T.esnParse(hex('feefc0a2d00501146e000159'))), JSON.stringify([{grams: -523, unit: 0, stable: true}]));
+  assert.equal(T.esnParse(hex('feefc0a2d005002a26020027'))[0].grams, null, 'another unit on the display is not read as grams');
+  assert.equal(T.esnParse(hex('feefc0a2d00501146e000158')).length, 0, 'a bad checksum is ignored');
+  assert.equal(T.esnParse(hex('feefc0a2d00500003c0001' + '12' + 'feefc0a2d0050000460000' + '1b')).map(r => r.grams).join(), '6,7', 'two packets in one notification');
+  const toHex = b => Array.from(b, x => x.toString(16).padStart(2, '0')).join('');
+  assert.equal(toHex(T.esnPacket(0xc1, [0])), 'feefc0a2c10100c2', 'tare');
+  assert.equal(toHex(T.esnPacket(0xc0, [0])), 'feefc0a2c00100c1', 'grams');
+  // no Bluetooth here, so no Weigh button; the demo scale still shows the whole flow
+  const chicken = {key: 'usda:1', source: 'usda', sourceId: '1', name: 'Chicken breast', per100: {kcal: 165, p: 31, c: 0, f: 3.6, fiber: 0}, servings: []};
+  T.S.sheet = {type: 'add-food', meal: 'dinner', mode: 'search'};
+  T.openPortion(chicken, 'dinner');
+  assert.ok(!T.viewPortion().includes('Weigh on scale'));
+  assert.ok(T.viewSettings().includes('Try it with a demo scale'));
+  T.Scale.startDemo();
+  assert.ok(T.viewPortion().includes('Weigh on scale'));
+  T.A['sc-weigh']();
+  assert.equal(T.S.sheet.weigh, true); assert.ok(T.viewPortion().includes('sc-g'));
+  T.Scale.feed({grams: 152.4, stable: true});
+  assert.equal(T.S.sheet.qty, 152); assert.equal(T.S.sheet.unit, 'g');
+  // add it and weigh the next food: the scale zeroes and the next pick starts weighing
+  T.A['portion-save-next']();
+  const logged = T.S.food.find(x => x.kind === 'log');
+  assert.equal(logged.grams, 152); assert.equal(Math.round(logged.totals.kcal), 251);
+  assert.equal(T.S.sheet.type, 'add-food'); assert.equal(T.S.sheet.plate, true);
+  assert.equal(T.Scale.grams(), 0, 'zeroed for the next food');
+  T.Scale.feed({grams: 152.4 + 180, stable: true});
+  T.openPortion({...chicken, key: 'usda:2', name: 'Rice', per100: {kcal: 130, p: 2.7, c: 28, f: 0.3, fiber: 0.4}}, 'dinner');
+  assert.equal(T.S.sheet.weigh, true); assert.equal(T.S.sheet.qty, 180, 'only the new food counts');
+  T.Scale.disconnect();
+  assert.equal(T.Scale.status, 'off');
 });

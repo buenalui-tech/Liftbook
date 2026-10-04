@@ -136,6 +136,26 @@ const A = {
   'portion-back': () => { S.sheet = S.sheet.back || null; render(); },
   'po-meal': d => { S.sheet.meal = d.v; render(); },
   'portion-save': () => savePortion(),
+  'portion-save-next': () => {
+    const meal = S.sheet.meal; savePortion();
+    if (S.sheet) return;   // didn't save (no amount)
+    Scale.tare(); S.sheet = {type: 'add-food', meal, mode: 'recent', q: '', plate: true}; render();
+  },
+  'sc-weigh': async () => {
+    const sh = S.sheet, start = () => { if (S.sheet === sh) { Object.assign(sh, {weigh: true, unit: 'g', qty: Math.max(0, Math.round(Scale.grams() || 0))}); render(); } };
+    if (Scale.status === 'on') { start(); return; }
+    try { if (Scale.status === 'lost' && Scale.dev) await Scale.attach(Scale.dev); else await Scale.connect(); start(); }
+    catch (e) { if (e.name !== 'NotFoundError') toast(e.message || 'Couldn’t connect to the scale.'); }
+  },
+  'sc-manual': () => { S.sheet.weigh = false; render(); },
+  'sc-tare': () => Scale.tare(),
+  'sc-connect': async () => { try { await Scale.connect(); toast(`${Scale.name} connected`); } catch (e) { if (e.name !== 'NotFoundError') toast(e.message || 'Couldn’t connect to the scale.'); } },
+  'sc-disconnect': () => Scale.disconnect(),
+  'sc-demo-start': () => { Scale.startDemo(); toast('Demo scale on. Add a food and tap Weigh on scale.'); },
+  'rec-start': async () => { try { await Scale.record(); } catch (e) { Scale.rec = null; render(); if (e.name !== 'NotFoundError') toast(e.message || 'Couldn’t connect.'); } },
+  'rec-stop': () => { Scale.stopRecording(); Scale.rec = null; render(); },
+  'rec-send': () => sendRecording(),
+  'rec-copy': async () => { try { await navigator.clipboard.writeText(Scale.rec.lines.join('\n')); toast('Copied'); } catch { toast('Copying isn’t allowed here. Use Send instead.'); } },
   'food-del': () => { if (!arm('fdel')) return; disarm(); const id = S.sheet.editId; S.food = S.food.filter(x => x.id !== id); store.deleteFood(id); S.sheet = null; render(); toast('Removed'); },
   'quick-save': () => saveQuickAdd(),
   'custom-new': d => { S.sheet = {type: 'custom-food', meal: (S.sheet && S.sheet.meal) || 'snack', barcode: d.v || ''}; render(); },
@@ -286,6 +306,7 @@ document.addEventListener('input', ev => {
   } else if (k === 'ed-date') { S.sheet.edit.dateStr = el.value;
   } else if (k === 'ed-name') { S.sheet.edit.routineName = el.value;
   } else if (k === 'fb-msg') { S.sheet.msg = el.value;
+  } else if (k === 'sc-demo') { Scale.demoG = +el.value;
   } else if (k === 'ts' || k === 'ts-step' || k === 'ts-name' || k === 'ts-ex') {
     const v = S.sheet.vals;
     if (k === 'ts') { const n = (el.dataset.k === 'warmup' || el.dataset.k === 'cooldown' ? parseFloat : parseInt)(el.value.replace(',', '.'), 10); v[el.dataset.k] = isNaN(n) ? null : n; }

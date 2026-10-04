@@ -407,5 +407,13 @@ textarea.note-in{width:100%;border:1px solid var(--line);border-radius:8px;backg
 .mi-bar i{display:block;height:100%;background:var(--accent);border-radius:3px}
 .mi-p{text-align:right;font-family:var(--display);font-weight:600;color:var(--muted)}
 .mi-na{grid-column:2/4;text-align:right}
+/* food scale */
+.weigh{display:flex;flex-direction:column;gap:10px;padding:14px;border:2px solid var(--accent);border-radius:14px;background:var(--accent-soft)}
+.weigh-g{font-family:var(--display);font-weight:700;font-size:64px;line-height:1;text-align:center}
+.weigh-g small{font-size:24px;margin-left:4px;color:var(--muted)}
+.sc-dot{width:8px;height:8px;border-radius:50%;background:var(--good);display:inline-block}
+.sc-steady{color:var(--good);font-weight:600}
+.weigh-btn svg,.banner svg{width:18px;height:18px;vertical-align:-3px;margin-right:4px}
+.btn svg{width:18px;height:18px;vertical-align:-3px}
 .toast{position:fixed;left:50%;transform:translateX(-50%);top:calc(12px + env(safe-area-inset-top,0px));z-index:20;background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:10px;font-weight:600;font-size:14px;max-width:calc(100% - 32px)}
 @media (prefers-reduced-motion: no-preference){.set.done{transition:background .2s}.rest .fill{transition:width .25s linear}}
