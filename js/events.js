@@ -131,7 +131,8 @@ const A = {
   'ex-note': d => { S.noteOpen = {...(S.noteOpen || {}), [d.e]: !(S.noteOpen && S.noteOpen[d.e])}; render(); const t = document.getElementById('note-' + d.e); if (t) t.focus(); },
   'food-add': d => { S.sheet = {type: 'add-food', meal: d.v, mode: 'search', q: ''}; render(); const i = document.getElementById('food-q'); if (i) i.focus(); },
   'food-mode': d => { S.sheet.mode = d.v; render(); },
-  'food-pick': d => { const f = S.sheet.results && S.sheet.results[+d.v]; if (f) openPortion(f, S.sheet.meal); },
+  'food-pick': d => { const sh = S.sheet, f = sh.results && sh.results[+d.v]; if (!f) return; if ((sh.q || '').trim() && (sh.remote || []).includes(f)) rememberSearch(sh.q); openPortion(f, sh.meal); },
+  'food-q-pick': d => { const i = document.getElementById('food-q'); if (i) i.value = d.v; onFoodQuery(d.v); },
   'food-edit': d => { const e = S.food.find(x => x.id === d.v); if (e) { S.sheet = null; openPortion(e.food, e.meal, e); } },
   'portion-back': () => { S.sheet = S.sheet.back || null; render(); },
   'po-meal': d => { S.sheet.meal = d.v; render(); },
@@ -139,7 +140,7 @@ const A = {
   'portion-save-next': () => {
     const meal = S.sheet.meal; savePortion();
     if (S.sheet) return;   // didn't save (no amount)
-    Scale.tare(); S.sheet = {type: 'add-food', meal, mode: 'recent', q: '', plate: true}; render();
+    Scale.tare(); S.sheet = {type: 'add-food', meal, mode: 'search', q: '', plate: true}; render();
   },
   'sc-weigh': async () => {
     const sh = S.sheet, start = () => { if (S.sheet === sh) { Object.assign(sh, {weigh: true, unit: 'g', qty: Math.max(0, Math.round(Scale.grams() || 0))}); render(); } };
@@ -326,7 +327,7 @@ document.addEventListener('input', ev => {
   } else if (k === 'ed-note') { S.sheet.edit.exercises[+el.dataset.e].note = el.value;
   } else if (k === 'ed-wnote') { S.sheet.edit.note = el.value;
   } else if (k === 'set-volume') { S.profile.settings = {...(S.profile.settings || {}), volume: +el.value}; later('profile', () => store.saveProfile());
-  } else if (k === 'food-q') { S.sheet.q = el.value; later('food-q', () => runSearch(el.value), 450);
+  } else if (k === 'food-q') { onFoodQuery(el.value);
   } else if (k === 'po-qty' || k === 'po-unit') {
     if (k === 'po-qty') S.sheet.qty = el.value; else S.sheet.unit = el.value;
     const {grams, totals} = portionTotals(S.sheet.food, parseFloat(String(S.sheet.qty).replace(',', '.')) || 0, S.sheet.unit);

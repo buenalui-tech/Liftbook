@@ -28,7 +28,7 @@ function loadApp(stored = {}, extra = {}) {
   vm.createContext(ctx);
   // top-level const/let live in the context's script scope; expose the names tests need
   const src = FILES.map(f => fs.readFileSync(new URL(`../js/${f}.js`, import.meta.url), 'utf8')).join('\n;\n') +
-    '\n;globalThis.T = {S, store, suggest, e1rm, niceTicks, weightSeries, weeklyRateKg, caloriesFor, improvements, recomputePRs, muscleLoad, musclesFor, tagFor, lastPerf, scanKg, conv, TEMPLATE, CATALOG, slug, startOfDay, fromUsda, fromOff, rankFoods, unitsFor, portionTotals, autoTargets, dayTotals, estimateBurn, targets, targetsFromBurn, computeTargets, nutritionPrefs, proposeTargets, applyCheckin, runAutoCheckin, checkinDue, copyMeal, foodLogs, viewToday, viewFood, viewProgress, viewBody, viewProgram, viewSheet, viewWorkout, startWorkout, viewSettings, buildPhases, Timer, viewTimer, viewTimerSetup, viewMobilitySetup, MOBILITY, viewTrainingLoad, sessionLoad, specFromVals, specToSheet, cleanSpec, specSecs, finishWorkout, timerOutline, viewTimerSetup, microFromUsda, microFromOff, entryMicro, viewMicros, Micro, fromUsda, portionMicros, Scale, esnParse, esnPacket, openPortion, viewPortion, A, viewSettings, TEMPLATE_COPY: () => JSON.parse(JSON.stringify(TEMPLATE))};';
+    '\n;globalThis.T = {S, store, suggest, e1rm, niceTicks, weightSeries, weeklyRateKg, caloriesFor, improvements, recomputePRs, muscleLoad, musclesFor, tagFor, lastPerf, scanKg, conv, TEMPLATE, CATALOG, slug, startOfDay, fromUsda, fromOff, rankFoods, unitsFor, portionTotals, autoTargets, dayTotals, estimateBurn, targets, targetsFromBurn, computeTargets, nutritionPrefs, proposeTargets, applyCheckin, runAutoCheckin, checkinDue, copyMeal, foodLogs, viewToday, viewFood, viewProgress, viewBody, viewProgram, viewSheet, viewWorkout, startWorkout, viewSettings, buildPhases, Timer, viewTimer, viewTimerSetup, viewMobilitySetup, MOBILITY, viewTrainingLoad, sessionLoad, specFromVals, specToSheet, cleanSpec, specSecs, finishWorkout, timerOutline, viewTimerSetup, microFromUsda, microFromOff, entryMicro, viewMicros, Micro, fromUsda, portionMicros, Scale, esnParse, esnPacket, openPortion, viewPortion, A, viewSettings, matchesQuery, localMatches, searchResultsHTML, onFoodQuery, rememberSearch, searchCache, viewAddFood, TEMPLATE_COPY: () => JSON.parse(JSON.stringify(TEMPLATE))};';
   vm.runInContext(src, ctx, {filename: 'liftbook.js'});
   return ctx.T;
 }
@@ -520,4 +520,30 @@ test('food scale: Etekcity packets, live grams into the portion, zero, and weigh
   assert.equal(T.S.sheet.weigh, true); assert.equal(T.S.sheet.qty, 180, 'only the new food counts');
   T.Scale.disconnect();
   assert.equal(T.Scale.status, 'off');
+});
+
+test('food search: your own foods first and instantly, meal-aware, no autocorrect, remembered searches', () => {
+  const T = loadApp();
+  assert.ok(T.matchesQuery('Chicken breast, roasted', 'chi bre'), 'each word can be the start of a word');
+  assert.ok(!T.matchesQuery('Chicken breast, roasted', 'chicken thigh'));
+  const now = Date.now(), food = (key, name) => ({key, source: 'usda', sourceId: key, name, per100: {kcal: 100, p: 10, c: 10, f: 1, fiber: 0}, servings: []});
+  const log = (id, f, meal, daysAgo, qtyLabel) => ({id, kind: 'log', date: now - daysAgo * DAY, meal, food: f, qty: 1, unit: 'g', qtyLabel, grams: 100, totals: {kcal: 100, p: 10, c: 10, f: 1, fiber: 0}});
+  const oats = food('o', 'Oats'), yog = food('y', 'Greek yogurt, plain'), steak = food('s', 'Beef steak, grilled');
+  T.S.food = [log(1, oats, 'breakfast', 1, '80 g'), log(2, oats, 'breakfast', 2, '80 g'), log(3, yog, 'breakfast', 3, '170 g'), log(4, steak, 'dinner', 1, '200 g'), log(5, steak, 'dinner', 2, '200 g'), log(6, steak, 'dinner', 3, '200 g')];
+  assert.equal(T.localMatches('', 'breakfast')[0].food.name, 'Oats', 'breakfast suggests your usual breakfast');
+  assert.equal(T.localMatches('', 'dinner')[0].food.name, 'Beef steak, grilled');
+  const sh = {type: 'add-food', meal: 'breakfast', mode: 'search', q: ''};
+  T.S.sheet = sh;
+  const html = T.viewAddFood();
+  assert.ok(html.includes('autocorrect="off"') && html.includes('spellcheck="false"'), 'the keyboard won’t rewrite food names');
+  assert.ok(html.includes('Your usual breakfast') && html.includes('last time 80 g'));
+  // typing shows your own match at once, and a cached database search answers without waiting
+  T.searchCache.set('greek', {results: [food('db1', 'Yogurt, Greek, nonfat'), yog], partial: false});
+  T.onFoodQuery('greek');
+  assert.equal(sh.results[0].name, 'Greek yogurt, plain', 'yours first');
+  assert.equal(sh.results.length, 2, 'the same food isn’t listed twice');
+  assert.ok(T.searchResultsHTML(sh).includes('Food database'));
+  T.rememberSearch('greek'); T.rememberSearch('oats'); T.rememberSearch('Greek');
+  assert.equal(T.S.profile.recentSearches.join(), 'Greek,oats');
+  sh.q = ''; assert.ok(T.searchResultsHTML(sh).includes('data-act="food-q-pick"'), 'recent searches as one-tap chips');
 });

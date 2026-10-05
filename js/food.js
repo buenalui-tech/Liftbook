@@ -226,21 +226,70 @@ function todayFoodCard() {
 
 /* ---------- add food: search, recent, my foods, quick add, scan ---------- */
 let searchSeq = 0;
+/* Search starts from what you already eat: your own history answers instantly as you type (no network),
+   meal-aware when the box is empty, and the food databases fill in underneath. Typing only repaints the
+   results, never the search box, so the keyboard, cursor and caret stay put. */
+const searchCache = new Map();   // query → database results, for this session
+function foodHistory() {
+  const by = new Map(), now = Date.now();
+  for (const x of S.food) {
+    if (x.kind !== 'log' || !x.food || x.food.source === 'quick') continue;
+    const k = x.food.key, e = by.get(k) || {food: x.food, n: 0, meals: {}, last: x};
+    e.n++; e.meals[x.meal] = (e.meals[x.meal] || 0) + 1;
+    if (x.date >= e.last.date) { e.last = x; e.food = x.food; }
+    by.set(k, e);
+  }
+  for (const c of S.food) if (c.kind === 'food') { const f = customAsFood(c); if (!by.has(f.key)) by.set(f.key, {food: f, n: 0, meals: {}, last: null}); }
+  return [...by.values()].map(e => ({...e, age: e.last ? (now - e.last.date) / DAY : 999}));
+}
+// every word you type is the start of some word in the name: "chi bre" finds "Chicken breast"
+function matchesQuery(name, q) {
+  const words = (name || '').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean), qs = q.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+  return qs.length && qs.every(w => words.some(x => x.startsWith(w)));
+}
+function localMatches(q, meal) {
+  const hist = foodHistory();
+  // often, recently, and at this meal
+  const score = e => e.n * 2 + (e.meals[meal] || 0) * 3 - Math.min(e.age, 60) / 6;
+  if (!q.trim()) return hist.filter(e => e.n).sort((a, b) => score(b) - score(a)).slice(0, 12);
+  return hist.filter(e => matchesQuery(`${e.food.name} ${e.food.brand || ''}`, q)).sort((a, b) => score(b) - score(a)).slice(0, 8);
+}
+function searchResultsHTML(sh) {
+  const q = (sh.q || '').trim(), local = localMatches(q, sh.meal), seen = new Set(local.map(e => e.food.key));
+  const meals = q ? S.food.filter(x => x.kind === 'meal' && matchesQuery(x.name, q)) : [];
+  const remote = q.length >= 2 && sh.remoteQ === q ? (sh.remote || []).filter(f => !seen.has(f.key)) : [];
+  sh.results = [...local.map(e => e.food), ...remote];
+  const portion = e => e.last && e.last.qtyLabel ? `last time ${e.last.qtyLabel}` : '';
+  let out = '';
+  if (!q) {
+    const searches = (S.profile.recentSearches || []).slice(0, 6);
+    out += searches.length ? `<div class="chips recent-q">${searches.map(s => `<button class="chipbtn" data-act="food-q-pick" data-v="${esc(s)}">${esc(s)}</button>`).join('')}</div>` : '';
+    out += local.length ? `<p class="eyebrow" style="margin:0">Your usual ${esc(mealLabel(sh.meal).toLowerCase())}</p><div class="lib">${local.map((e, i) => foodResult(e.food, i, portion(e))).join('')}</div>`
+      : '<p class="small muted">Search for a food, or scan a barcode. Foods you log show up here first next time, ready to add again in one tap.</p>';
+    return out;
+  }
+  if (local.length || meals.length) out += `<p class="eyebrow" style="margin:0">Yours</p><div class="lib">${meals.map(m => `<button data-act="saved-meal-log" data-v="${esc(m.id)}"><span class="stack" style="gap:1px;min-width:0;text-align:left"><span class="fname">${esc(m.name)}</span><span class="small muted">${m.items.length} items · ${fmtNum(mealKcal(m))} kcal</span></span><span class="src custom">Meal</span></button>`).join('')}${local.map((e, i) => foodResult(e.food, i, portion(e))).join('')}</div>`;
+  if (q.length < 2) return out;
+  if (remote.length) out += `<p class="eyebrow" style="margin:0">Food database</p><div class="lib">${remote.map((f, i) => foodResult(f, local.length + i)).join('')}</div>`;
+  if (sh.loading) out += '<p class="small muted" style="margin:0">Searching the food database…</p>';
+  else if (sh.remoteQ === q && !remote.length && !local.length && !meals.length) out += `<p class="small muted">No matches for “${esc(q)}”. Try fewer words, or create it under My foods.</p>`;
+  if (sh.partial && sh.remoteQ === q) out += '<p class="small muted" style="margin:0">One of the food databases didn’t answer, so results may be incomplete.</p>';
+  return out;
+}
+// repaint only the list under the search box
+function paintSearch() {
+  const box = document.getElementById('food-results');
+  if (box && S.sheet && S.sheet.type === 'add-food') box.innerHTML = searchResultsHTML(S.sheet);
+}
 function viewAddFood() {
-  const sh = S.sheet, mode = sh.mode || 'search';
-  const tabs = [['search', 'Search'], ['recent', 'Recent'], ['mine', 'My foods'], ['quick', 'Quick add']];
+  const sh = S.sheet, mode = sh.mode === 'recent' ? 'search' : sh.mode || 'search';
+  const tabs = [['search', 'Search'], ['mine', 'My foods'], ['quick', 'Quick add']];
   let body = '';
   if (mode === 'search') {
-    const r = sh.results;
-    body = `<div class="row" style="gap:8px"><input id="food-q" data-in="food-q" class="grow search" value="${esc(sh.q || '')}" placeholder="Search foods, e.g. greek yogurt" autocomplete="off" enterkeyhint="search">
+    body = `<div class="row" style="gap:8px"><input id="food-q" data-in="food-q" type="search" class="grow search" value="${esc(sh.q || '')}" placeholder="Search foods, e.g. greek yogurt"
+        autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" enterkeyhint="search">
         <button class="btn" data-act="barcode-open" aria-label="Scan a barcode">${BARCODE_ICON} Scan</button></div>
-      ${sh.loading ? '<p class="small muted">Searching…</p>' : ''}
-      ${r ? (r.length ? `<div class="lib">${r.map((x, i) => foodResult(x, i)).join('')}</div>` : `<p class="small muted">No matches for “${esc(sh.q)}”. Try fewer words, or create it under My foods.</p>`) : ''}
-      ${sh.partial ? '<p class="small muted" style="margin:0">One of the food databases didn’t answer, so results may be incomplete.</p>' : ''}`;
-  } else if (mode === 'recent') {
-    const rec = recentFoods();
-    sh.results = rec.map(x => x.food);
-    body = rec.length ? `<div class="lib">${rec.map((x, i) => foodResult(x.food, i, x.last.qtyLabel)).join('')}</div>` : '<p class="small muted">Foods you log show up here for one-tap repeats.</p>';
+      <div class="stack" id="food-results" style="gap:10px">${searchResultsHTML(sh)}</div>`;
   } else if (mode === 'mine') {
     const mine = S.food.filter(x => x.kind === 'food').sort((a, b) => a.name.localeCompare(b.name));
     const meals = S.food.filter(x => x.kind === 'meal').sort((a, b) => a.name.localeCompare(b.name));
@@ -261,7 +310,7 @@ function viewAddFood() {
   }
   return `<div class="row between"><h2>Add to ${esc(mealLabel(sh.meal))}</h2><button class="iconbtn" data-act="sheet-close" aria-label="Close">✕</button></div>
     ${sh.plate ? `<div class="banner small">${ICON_SCALE} Scale zeroed. Put the next food on the plate and pick it below, or close when you’re done.</div>` : ''}
-    <div class="seg tabs4" role="tablist">${tabs.map(([k, l]) => `<button data-act="food-mode" data-v="${k}" aria-pressed="${mode === k}">${l}</button>`).join('')}</div>
+    <div class="seg tabs3" role="tablist">${tabs.map(([k, l]) => `<button data-act="food-mode" data-v="${k}" aria-pressed="${mode === k}">${l}</button>`).join('')}</div>
     ${body}`;
 }
 const mealLabel = m => (MEALS.find(x => x[0] === m) || [, 'Snacks'])[1];
@@ -272,16 +321,31 @@ function foodResult(x, i, note) {
     <span class="small muted">${esc([x.brand, note || per].filter(Boolean).join(' · '))}</span></span>
     <span class="src ${x.source}">${x.source === 'usda' ? 'USDA' : x.source === 'off' ? 'Label' : 'Mine'}</span></button>`;
 }
+// typing: your own foods repaint at once; the databases are asked after a short pause, and remembered
+function onFoodQuery(q) {
+  const sh = S.sheet; sh.q = q; paintSearch();
+  const t = q.trim();
+  if (t.length < 2) { searchSeq++; sh.loading = false; return; }
+  const hit = searchCache.get(t.toLowerCase());
+  if (hit) { searchSeq++; Object.assign(sh, {remote: hit.results, remoteQ: t, partial: hit.partial, loading: false}); paintSearch(); return; }
+  sh.loading = true; paintSearch();
+  later('food-q', () => runSearch(t), 350);
+}
 async function runSearch(q) {
   const sh = S.sheet, seq = ++searchSeq;
-  q = q.trim(); if (q.length < 2) { sh.results = null; sh.loading = false; render(); return; }
-  sh.loading = true; render();
-  const mine = S.food.filter(x => x.kind === 'food' && x.name.toLowerCase().includes(q.toLowerCase())).map(customAsFood);
+  q = q.trim(); if (q.length < 2) return;
   const [u, o] = await Promise.all([searchUsda(q), searchOff(q)]);
+  const results = [...rankFoods(u || [], q).slice(0, 12), ...(o || []).slice(0, 12)], partial = !u || !o;
+  if (u && o) searchCache.set(q.toLowerCase(), {results, partial});
   if (seq !== searchSeq || S.sheet !== sh) return;   // a newer search or a closed sheet wins
-  sh.loading = false; sh.partial = !u || !o;
-  sh.results = [...mine, ...rankFoods(u || [], q).slice(0, 12), ...(o || []).slice(0, 12)];
-  render();
+  Object.assign(sh, {remote: results, remoteQ: q, partial, loading: false});
+  paintSearch();
+}
+// a database pick from a search is worth remembering as a recent search
+function rememberSearch(q) {
+  q = (q || '').trim(); if (q.length < 2) return;
+  const list = (S.profile.recentSearches || []).filter(s => s.toLowerCase() !== q.toLowerCase());
+  S.profile.recentSearches = [q, ...list].slice(0, 8); store.saveProfile();
 }
 
 /* ---------- portion: how much, which meal ---------- */
