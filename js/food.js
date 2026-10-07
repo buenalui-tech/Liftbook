@@ -46,10 +46,14 @@ async function fetchJSON(url, tries = 2) {
   return null;
 }
 async function searchUsda(q) {
-  const url = `https://api.nal.usda.gov/fdc/v1/foods/search?api_key=${encodeURIComponent(usdaKey())}&query=${encodeURIComponent(q)}` +
+  const url = s => `https://api.nal.usda.gov/fdc/v1/foods/search?api_key=${encodeURIComponent(usdaKey())}&query=${encodeURIComponent(s)}` +
     '&pageSize=30&requireAllWords=true&dataType=Foundation&dataType=SR%20Legacy&dataType=Survey%20%28FNDDS%29';
-  const d = await fetchJSON(url);
-  return d && Array.isArray(d.foods) ? d.foods.map(fromUsda) : null;
+  // USDA's own top 30 for one word ("rice") is all dishes named after it; asking for "rice cooked" too brings in the plain food
+  const one = q.trim().split(/\s+/).length === 1 && !COOK_WORDS.test(q) && !/\braw\b/i.test(q);
+  const [d, d2] = await Promise.all([fetchJSON(url(q), 3), one ? fetchJSON(url(q + ' cooked'), 3) : null]);
+  if (!d || !Array.isArray(d.foods)) return null;
+  const seen = new Set(), foods = [...d.foods, ...(d2 && Array.isArray(d2.foods) ? d2.foods : [])].filter(f => !seen.has(f.fdcId) && seen.add(f.fdcId));
+  return foods.map(fromUsda);
 }
 async function searchOff(q) {
   const url = `https://world.openfoodfacts.org/cgi/search.pl?search_terms=${encodeURIComponent(q)}&search_simple=1&json=1&page_size=20` +
@@ -62,19 +66,43 @@ async function lookupBarcode(code) {
   const d = await fetchJSON(`https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(code)}.json?fields=code,product_name,generic_name,brands,nutriments,serving_size,serving_quantity`);
   return d && d.status === 1 ? fromOff(d.product) : null;
 }
-// Plain matches first: "chicken breast" should find "Chicken breast, roasted" before "Lunchmeat, chicken breast"
+/* Plain foods first. USDA names a food as "Food, descriptor, descriptor" ("Rice, white, long-grain, cooked"),
+   so: a dish named after the food ("Rice dressing", "Salmon salad", "Steak tartare") ranks below the food itself;
+   cooking and cut words ("cooked", "skinless", "2%") cost almost nothing; processed or mixed words ("roll",
+   "glutinous", "with", "breaded") cost a lot, unless you typed them. Plurals match ("eggs" = "egg"). */
+const stemWord = w => w.length > 4 && w.endsWith('ies') ? w.slice(0, -3) + 'y' : w.length > 4 && w.endsWith('oes') ? w.slice(0, -2) : w.length > 3 && w.endsWith('s') && !w.endsWith('ss') ? w.slice(0, -1) : w;
+const foodTokens = s => String(s || '').toLowerCase().split(/[^a-z0-9%]+/).filter(Boolean).map(stemWord);
+// USDA sometimes leads with a category: "Fish, salmon, raw", "Oil, olive", "Cheese, cottage", "Beef, ground"
+const FOOD_CATEGORY = new Set(['fish', 'beef', 'pork', 'lamb', 'veal', 'chicken', 'turkey', 'cheese', 'oil', 'yogurt', 'milk', 'nut', 'seed', 'egg', 'cereal', 'bean', 'pea', 'lentil', 'crustacean', 'mollusk', 'spice', 'game', 'squash', 'lettuce', 'pepper', 'cabbage', 'mushroom']);
+const PLAIN_WORDS = new Set(['raw', 'cooked', 'boiled', 'baked', 'roasted', 'grilled', 'steamed', 'broiled', 'poached', 'scrambled', 'plain', 'whole', 'white', 'brown',
+  'skinless', 'boneless', 'lean', 'fresh', 'regular', 'enriched', 'unenriched', 'long', 'grain', 'medium', 'meat', 'only', 'large', 'nonfat', 'low', 'fat', 'reduced',
+  '2%', '1%', 'skim', 'lowfat', 'nfs', 'without', 'skin', 'salt', 'added', 'unsalted', 'dry', 'heat', 'oven', 'grade', 'a', 'ns', 'as', 'to', 'form', 'in', 'or', 'and',
+  'of', 'broiler', 'fryer', 'light', 'dark', 'ground', 'uncooked', 'prepared', 'from', 'water', 'unsweetened', 'creamy', 'smooth', 'chunky', 'virgin', 'extra', 'hass',
+  'peeled', 'flesh', 'separable', 'trimmed', 'all', 'grade', 'choice', 'select', 'cut', 'breast', 'thigh', 'fillet', 'flaked', 'pack', 'bone', 'old', 'fashioned', 'rolled', 'quick', 'instant'].map(stemWord));
+const NOT_PLAIN = new Set(['salad', 'sandwich', 'sub', 'wrap', 'burrito', 'taco', 'pie', 'cake', 'patty', 'nugget', 'soup', 'stew', 'chowder', 'casserole', 'dressing', 'sauce',
+  'gravy', 'pilaf', 'pudding', 'tart', 'tartare', 'teriyaki', 'benedict', 'creamed', 'deviled', 'candied', 'chip', 'tot', 'roll', 'loaf', 'lunchmeat', 'deli', 'bologna',
+  'frankfurter', 'sausage', 'dumpling', 'fritter', 'pancake', 'baby', 'human', 'malted', 'flavored', 'glutinous', 'dessert', 'smoothie', 'shake', 'bar', 'paper', 'leave',
+  'dip', 'spread', 'stuffing', 'croquette', 'breaded', 'battered', 'fried', 'dehydrated', 'powder', 'nectar', 'frozen', 'imitation', 'substitute', 'meatless', 'yolk',
+  'ingredient', 'jerky', 'cured', 'smoked', 'juice', 'syrup', 'jam', 'jelly', 'pickled', 'sweetened', 'coated', 'with', 'sliced', 'free', 'formulated', 'puree', 'dish',
+  'mixture', 'topping', 'filling', 'strudel', 'bread', 'noodle', 'cracker', 'cookie', 'muffin', 'meal', 'kit', 'oil', 'flour', 'bran'].map(stemWord));
+const COOK_WORDS = /\b(baked|fried|roasted|grilled|boiled|cooked|steamed|broiled|poached|scrambled)\b/i;
+function foodScore(x, q) {
+  const qs = new Set(foodTokens(q)), first = foodTokens(x.name.split(',')[0]), all = new Set(foodTokens(x.name));
+  let s = 0;
+  // the food itself, not a dish named after it
+  if (first.some(t => !qs.has(t)) && !(first.length === 1 && FOOD_CATEGORY.has(first[0]))) s += 3;
+  // after a category, the next part names the food: "Fish, salmon" yes, "Cereal, rice squares" no
+  else if (first.length === 1 && FOOD_CATEGORY.has(first[0]) && !qs.has(first[0])) { const second = foodTokens(x.name.split(',')[1]); if (second.some(t => !qs.has(t) && !PLAIN_WORDS.has(t))) s += 2.5; }
+  if (!qs.has(first[0]) && !FOOD_CATEGORY.has(first[0])) s += 2;
+  for (const t of all) if (!qs.has(t)) s += NOT_PLAIN.has(t) ? 2.5 : PLAIN_WORDS.has(t) ? 0.1 : 0.6;
+  if (/\begg whites?\b/i.test(x.name) && !qs.has('white')) s += 2;   // "eggs" means whole eggs
+  if (/\bNFS\b/.test(x.name)) s -= 1;                                // "not further specified": the everyday generic one
+  if (!COOK_WORDS.test(q) && all.has('raw')) s -= 0.5;               // "banana" means a raw banana
+  if (x.dataType === 'Foundation') s -= 0.3;
+  return s;
+}
 function rankFoods(foods, q) {
-  const words = q.toLowerCase().split(/\W+/).filter(Boolean);
-  const score = x => {
-    const toks = x.name.toLowerCase().split(/\W+/).filter(Boolean);
-    const extra = toks.filter(t => !words.includes(t)).length;
-    const lead = toks[0] === words[0] ? 0 : 4;
-    const processed = /\b(lunchmeat|breaded|fried|canned|baby food|dehydrated|powder|nectar|sauce|frozen meal)\b/i.test(x.name) && !words.some(w => /lunchmeat|breaded|fried|canned|baby|dehydrated|powder|nectar|sauce/.test(w)) ? 3 : 0;
-    const cooked = /\b(baked|fried|roasted|grilled|boiled|cooked|raw|steamed)\b/i;
-    const plain = !words.some(w => cooked.test(w)) && toks.includes('raw') ? -0.8 : 0;   // "banana" means a raw banana
-    return lead + processed + plain + extra * 0.6 + (x.dataType === 'Foundation' ? -0.3 : 0);
-  };
-  return foods.map(x => [score(x), x]).sort((a, b) => a[0] - b[0]).map(e => e[1]);
+  return foods.map((x, i) => [foodScore(x, q), i, x]).sort((a, b) => a[0] - b[0] || a[1] - b[1]).map(e => e[2]);
 }
 
 /* ---------- my foods, recents, totals ---------- */

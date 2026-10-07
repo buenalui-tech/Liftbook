@@ -183,6 +183,23 @@ test('food: plain matches rank above processed ones', () => {
   assert.equal(ranked[0].name, 'Chicken breast, roasted');
 });
 
+test('food: the food itself beats dishes named after it, with real USDA names', () => {
+  const T = loadApp();
+  const top = (q, list) => T.rankFoods(list.map(([name, dataType]) => ({name, dataType: dataType || 'Survey (FNDDS)', source: 'usda'})), q)[0].name;
+  // USDA's own order is shown first in each list
+  assert.equal(top('rice', [['Dirty rice'], ['Rice dressing'], ['Rice paper'], ['Rice pilaf'], ['Cereal, rice squares'], ['Rice milk'], ['Rice, cooked, NFS'], ['Rice, white, cooked, glutinous']]), 'Rice, cooked, NFS');
+  assert.equal(top('rice white cooked', [['Rice, white, cooked, glutinous'], ['Rice, white, cooked, as ingredient'], ['Rice, white, medium-grain, cooked, unenriched', 'SR Legacy']]), 'Rice, white, medium-grain, cooked, unenriched');
+  assert.equal(top('salmon', [['Salmon salad'], ['Salmon cake sandwich'], ['Salmon nuggets, cooked as purchased, unheated', 'SR Legacy'], ['Fish, salmon, raw'], ['Fish, salmon, NFS']]), 'Fish, salmon, NFS');
+  assert.equal(top('steak', [['Steak tartare'], ['Steak teriyaki'], ['Steak sandwich or sub on wheat'], ['Beef, steak, NFS'], ['Beef, steak, chuck']]), 'Beef, steak, NFS');
+  assert.equal(top('chicken breast roasted', [['Chicken breast, roll, oven-roasted', 'SR Legacy'], ['Chicken breast, oven-roasted, fat-free, sliced', 'SR Legacy'], ['Chicken, broilers or fryers, breast, meat only, cooked, roasted', 'SR Legacy']]), 'Chicken, broilers or fryers, breast, meat only, cooked, roasted');
+  assert.equal(top('eggs', [['Eggs, Grade A, Large, egg white', 'Foundation'], ['Eggs, Grade A, Large, egg whole', 'Foundation'], ['Eggs, Grade A, Large, egg yolk', 'Foundation']]), 'Eggs, Grade A, Large, egg whole', 'eggs means whole eggs; plurals match');
+  assert.equal(top('potato', [['Potato patty'], ['Potato pancake'], ['Potato, NFS']]), 'Potato, NFS');
+  assert.equal(top('oats', [['Oat milk'], ['Oil, oat', 'SR Legacy'], ['Oat bran, raw', 'SR Legacy'], ['Oats, raw']]), 'Oats, raw');
+  assert.equal(top('banana', [['Banana chips'], ['Banana, baked'], ['Banana, raw']]), 'Banana, raw', 'a plain word means the raw food');
+  // a word you typed is never held against a result
+  assert.equal(top('salmon salad', [['Fish, salmon, raw'], ['Salmon salad']]), 'Salmon salad');
+});
+
 test('food: targets come from the InBody BMR when there is one, and the goal moves them', () => {
   const T = loadApp();
   T.S.body = [{id: 'w', kind: 'weight', date: Date.now() - DAY, w: 200, unit: 'lb'}];
