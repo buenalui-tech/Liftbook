@@ -379,6 +379,20 @@ document.addEventListener('touchend', ev => {
   const t = ev.changedTouches[0], dx = t.clientX - swipe.x, dy = t.clientY - swipe.y; swipe = null;
   if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.5) stepDay(dx < 0 ? 1 : -1);
 }, {passive: true});
+// tapping into a number puts the cursor after it, ready to backspace, wherever on the box the tap landed;
+// the phone places its own cursor after focus, so put it back once the tap's click lands
+const caretEnd = el => { try { const n = el.value.length; el.setSelectionRange(n, n); } catch {} };
+let caretTap = null;
+document.addEventListener('focusin', ev => {
+  const el = ev.target;
+  if (el.tagName !== 'INPUT' || (el.inputMode !== 'numeric' && el.inputMode !== 'decimal')) return;
+  caretTap = {el, at: Date.now()}; caretEnd(el);
+  setTimeout(() => { if (document.activeElement === el) caretEnd(el); }, 0);
+});
+document.addEventListener('click', ev => {
+  if (caretTap && ev.target === caretTap.el && Date.now() - caretTap.at < 600) caretEnd(caretTap.el);
+  caretTap = null;
+}, true);
 document.addEventListener('toggle', ev => { if (ev.target.id === 'wt-details') S.wtOpen = ev.target.open; if (ev.target.id === 'micro-details') S.microOpen = ev.target.open;
   if (ev.target.id === 'food-micros' && S.foodMicroOpen !== ev.target.open) { S.foodMicroOpen = ev.target.open; render(); } }, true);
 async function importProgramFile(file) {
