@@ -16,7 +16,7 @@ A workout log that runs in your phone's browser and installs to the home screen.
 |---|---|
 | `index.html` | The page shell; loads the stylesheet and scripts in order |
 | `css/app.css` | All styling (colour tokens for light and dark at the top) |
-| `js/*.js` | The app, split by area: `core` (helpers, library, storage, sync, state), `training`, `ui`, `program`, `body`, `figure` (3D), `share`, `tester`, `events` (input and startup). Classic scripts sharing top-level names, loaded in that order |
+| `js/*.js` | The app, split by area: `core` (helpers, library, storage, sync, state), `training`, `ui`, `howto` (form videos), `program`, `body`, `figure` (3D), `share`, `tester`, `events` (input and startup). Classic scripts sharing top-level names, loaded in that order |
 | `manifest.webmanifest` | Lets phones install it as a home-screen app |
 | `config.js` | Supabase project URL and publishable key (public by design) |
 | `sw.js` | Offline cache. **Bump `VERSION` (and `APP_VERSION` in `js/core.js`) on every release** |

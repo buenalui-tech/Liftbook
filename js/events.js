@@ -27,6 +27,13 @@ const A = {
   'sheet-close': () => { S.sheet = null; disarm(); render(); },
   scrim: (d, ev) => { if (S.sheet && (S.sheet.edit || S.sheet.type === 'timer-setup')) return;   // don't drop unsaved edits on a stray tap
     if (ev.target.classList.contains('scrim')) { S.sheet = null; disarm(); render(); } },
+  'howto': d => { S.sheet = {type: 'howto', exId: d.v, name: d.n}; render(); },
+  'howto-save': () => {
+    const i = document.getElementById('howto-link'), id = ytId(i && i.value);
+    if (!id) { toast('That isn’t a YouTube link. In YouTube tap Share → Copy link, then paste it here'); return; }
+    S.profile.videos = {...(S.profile.videos || {}), [S.sheet.exId]: id}; store.saveProfile(); render(); toast('Video saved');
+  },
+  'howto-reset': () => { const v = {...(S.profile.videos || {})}; delete v[S.sheet.exId]; S.profile.videos = v; store.saveProfile(); render(); },
   'add-ex-open': () => { S.sheet = {type:'add-ex', q:''}; render(); },
   'add-ex': d => { const ex = libraryExercises().find(x => x.id === d.v); if (!ex) return; S.active.exercises.push(buildEx(ex)); S.sheet = null; saveActiveSoon(); render(); window.scrollTo(0, document.body.scrollHeight); },
   'add-custom': () => {

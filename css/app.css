@@ -57,6 +57,7 @@ h3{font-family:var(--display);font-weight:600;font-size:20px;line-height:1.1;mar
 
 /* buttons */
 .btn{border:1px solid var(--line);background:var(--surface);border-radius:10px;padding:10px 14px;font-weight:600;min-height:44px;display:inline-flex;align-items:center;justify-content:center;gap:6px}
+a.btn{color:inherit;text-decoration:none}
 .btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
 .btn.danger{color:var(--pr);border-color:var(--pr)}
 .btn.danger.armed{background:var(--pr);color:#fff}
@@ -163,6 +164,8 @@ button.day:disabled{opacity:.35;cursor:default}
 .scrim{position:fixed;inset:0;z-index:9;background:rgba(8,12,18,.5);display:flex;align-items:flex-end;justify-content:center}
 .sheet{background:var(--surface);width:100%;max-width:560px;max-height:88%;overflow:auto;border-radius:16px 16px 0 0;padding:18px 16px calc(18px + env(safe-area-inset-bottom,0px));display:flex;flex-direction:column;gap:14px}
 .sheet>*{flex-shrink:0}
+.video{position:relative;aspect-ratio:16/9;border-radius:12px;overflow:hidden;background:#000}
+.video iframe{position:absolute;inset:0;width:100%;height:100%;border:0}
 .field{display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--muted);font-weight:600}
 .field input,.field select{height:44px;border:1px solid var(--line);border-radius:8px;background:var(--sunk);padding:0 10px;font-size:16px;font-weight:500;color:var(--ink)}
 .lib{display:flex;flex-direction:column;max-height:260px;overflow:auto;border:1px solid var(--line);border-radius:10px}

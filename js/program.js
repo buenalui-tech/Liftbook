@@ -25,6 +25,7 @@ function viewProgramBuilder() {
       <button class="btn" data-act="edit-routine" data-v="${esc(r.id)}">Edit</button></div>`;
     const rows = r.exercises.map((ex, xi) => `<div class="edrow">
       <div class="row between"><b>${esc(ex.name)}</b><div class="row" style="gap:0">
+        <button class="iconbtn" data-act="howto" data-v="${esc(ex.id)}" data-n="${esc(ex.name)}" aria-label="How to do ${esc(ex.name)}">${ICON.play}</button>
         <button class="iconbtn" data-act="p-up" data-r="${ri}" data-x="${xi}" aria-label="Move up" ${xi ? '' : 'disabled'}>↑</button>
         <button class="iconbtn" data-act="p-rm" data-r="${ri}" data-x="${xi}" aria-label="Remove ${esc(ex.name)}" style="color:${S.armed === `prm${ri}-${xi}` ? 'var(--pr)' : 'inherit'}">${S.armed === `prm${ri}-${xi}` ? '✓?' : '✕'}</button></div></div>
       <div class="ednums">

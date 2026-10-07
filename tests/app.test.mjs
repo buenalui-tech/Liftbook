@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 
-const FILES = ['core', 'training', 'ui', 'program', 'body', 'food', 'scale', 'adaptive', 'figure', 'share', 'tester', 'settings', 'timer', 'events'];
+const FILES = ['core', 'training', 'ui', 'howto', 'program', 'body', 'food', 'scale', 'adaptive', 'figure', 'share', 'tester', 'settings', 'timer', 'events'];
 const DAY = 86400000;
 
 function loadApp(stored = {}, extra = {}) {
@@ -28,7 +28,7 @@ function loadApp(stored = {}, extra = {}) {
   vm.createContext(ctx);
   // top-level const/let live in the context's script scope; expose the names tests need
   const src = FILES.map(f => fs.readFileSync(new URL(`../js/${f}.js`, import.meta.url), 'utf8')).join('\n;\n') +
-    '\n;globalThis.T = {S, store, suggest, e1rm, niceTicks, weightSeries, weeklyRateKg, caloriesFor, improvements, recomputePRs, muscleLoad, musclesFor, tagFor, lastPerf, scanKg, conv, TEMPLATE, CATALOG, slug, startOfDay, fromUsda, fromOff, rankFoods, unitsFor, portionTotals, autoTargets, dayTotals, estimateBurn, targets, targetsFromBurn, computeTargets, nutritionPrefs, proposeTargets, applyCheckin, runAutoCheckin, checkinDue, copyMeal, foodLogs, viewToday, viewFood, viewProgress, viewBody, viewProgram, viewSheet, viewWorkout, startWorkout, viewSettings, buildPhases, Timer, viewTimer, viewTimerSetup, viewMobilitySetup, MOBILITY, viewTrainingLoad, sessionLoad, specFromVals, specToSheet, cleanSpec, specSecs, finishWorkout, timerOutline, viewTimerSetup, microFromUsda, microFromOff, entryMicro, viewMicros, Micro, fromUsda, portionMicros, Scale, esnParse, esnPacket, openPortion, viewPortion, A, viewSettings, matchesQuery, localMatches, searchResultsHTML, onFoodQuery, rememberSearch, searchCache, viewAddFood, TEMPLATE_COPY: () => JSON.parse(JSON.stringify(TEMPLATE))};';
+    '\n;globalThis.T = {S, store, suggest, e1rm, niceTicks, weightSeries, weeklyRateKg, caloriesFor, improvements, recomputePRs, muscleLoad, musclesFor, tagFor, lastPerf, scanKg, conv, TEMPLATE, CATALOG, slug, startOfDay, fromUsda, fromOff, rankFoods, unitsFor, portionTotals, autoTargets, dayTotals, estimateBurn, targets, targetsFromBurn, computeTargets, nutritionPrefs, proposeTargets, applyCheckin, runAutoCheckin, checkinDue, copyMeal, foodLogs, viewToday, viewFood, viewProgress, viewBody, viewProgram, viewSheet, viewWorkout, startWorkout, viewSettings, buildPhases, Timer, viewTimer, viewTimerSetup, viewMobilitySetup, MOBILITY, viewTrainingLoad, sessionLoad, specFromVals, specToSheet, cleanSpec, specSecs, finishWorkout, timerOutline, viewTimerSetup, microFromUsda, microFromOff, entryMicro, viewMicros, Micro, fromUsda, portionMicros, Scale, esnParse, esnPacket, openPortion, viewPortion, A, viewSettings, matchesQuery, localMatches, searchResultsHTML, onFoodQuery, rememberSearch, searchCache, viewAddFood, ytId, formVideo, FORM_VIDEOS, viewHowto, holdForVideo, TEMPLATE_COPY: () => JSON.parse(JSON.stringify(TEMPLATE))};';
   vm.runInContext(src, ctx, {filename: 'liftbook.js'});
   return ctx.T;
 }
@@ -563,4 +563,26 @@ test('food search: your own foods first and instantly, meal-aware, no autocorrec
   T.rememberSearch('greek'); T.rememberSearch('oats'); T.rememberSearch('Greek');
   assert.equal(T.S.profile.recentSearches.join(), 'Greek,oats');
   sh.q = ''; assert.ok(T.searchResultsHTML(sh).includes('data-act="food-q-pick"'), 'recent searches as one-tap chips');
+});
+
+test('form videos: pasted YouTube links resolve to an id, saved videos win over the suggested one', () => {
+  const T = loadApp();
+  for (const link of ['https://www.youtube.com/watch?v=vcBig73ojpE', 'https://youtu.be/vcBig73ojpE?si=abc', 'https://m.youtube.com/watch?feature=share&v=vcBig73ojpE',
+    'https://www.youtube.com/shorts/vcBig73ojpE', 'https://www.youtube-nocookie.com/embed/vcBig73ojpE?rel=0', ' vcBig73ojpE '])
+    assert.equal(T.ytId(link), 'vcBig73ojpE', link);
+  for (const bad of ['', 'bench press', 'https://example.com/watch', 'https://youtu.be/short']) assert.equal(T.ytId(bad), null, bad);
+  // every template exercise has a suggested video, keyed by the same id the workout uses
+  for (const r of T.TEMPLATE.routines) for (const ex of r.exercises) assert.match(T.FORM_VIDEOS[ex.id] || '', /^[\w-]{11}$/, ex.name);
+  assert.equal(T.formVideo('bench-press-barbell'), 'vcBig73ojpE');
+  T.S.profile.videos = {'bench-press-barbell': 'aaaaaaaaaaa', 'my-custom-lift': 'bbbbbbbbbbb'};
+  assert.equal(T.formVideo('bench-press-barbell'), 'aaaaaaaaaaa');
+  assert.equal(T.formVideo('my-custom-lift'), 'bbbbbbbbbbb');
+  assert.equal(T.formVideo('nothing-here'), null);
+  T.S.sheet = {type: 'howto', exId: 'my-custom-lift', name: 'My <Lift>'};
+  const html = T.viewHowto();
+  assert.match(html, /youtube-nocookie\.com\/embed\/bbbbbbbbbbb/);
+  assert.match(html, /My &lt;Lift&gt;/);
+  assert.match(html, /Remove this video/);
+  T.S.sheet = {type: 'howto', exId: 'nothing-here', name: 'Nothing'};
+  assert.doesNotMatch(T.viewHowto(), /iframe/);
 });

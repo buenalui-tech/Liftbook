@@ -4,7 +4,7 @@
 /* ---------- render ---------- */
 const $app = document.getElementById('app');
 function render() {
-  if (!S.ready) return;
+  if (!S.ready || holdForVideo()) return;
   // redraws (e.g. a sync landing) must not wipe what someone is typing
   const keep = {}, focused = document.activeElement && document.activeElement.id;
   document.querySelectorAll('#wt-in, #wt-date, #scan-form input, #scan-form select').forEach(el => { keep[el.id] = el.value; });
@@ -342,6 +342,7 @@ function viewWorkout() {
         <button class="btn danger ${S.armed === 'rmex' + ei ? 'armed' : ''}" data-act="ex-remove" data-e="${ei}">${S.armed === 'rmex' + ei ? 'Tap again to remove' : 'Remove exercise'}</button></div>` : '';
     return `<section class="card ex">
       <div class="ex-head"><div class="grow stack" style="gap:2px"><h3>${esc(e.name)}</h3><span class="ex-meta num">${e.target || e.sets.length} × ${rangeText(e)}${e.timed ? 's' : ''} · rest ${fmtDur(e.rest)} · ${esc(e.muscle || '')}</span></div>
+      <button class="iconbtn" data-act="howto" data-v="${esc(e.exId)}" data-n="${esc(e.name)}" aria-label="How to do ${esc(e.name)}">${ICON.play}</button>
       <button class="iconbtn ${e.note ? 'has-note' : ''}" data-act="ex-note" data-e="${ei}" aria-label="${e.note ? 'Edit note' : 'Add a note'}">${ICON_NOTE}</button>
       <button class="iconbtn" data-act="ex-menu" data-e="${ei}" aria-label="Exercise options">${ICON.dots}</button></div>
       ${menu}
@@ -417,6 +418,8 @@ function viewSheet() {
       <button class="btn primary block" data-act="meal-save">Save meal</button>`;
   } else if (S.sheet.type === 'feedback') {
     body = viewFeedbackSheet();
+  } else if (S.sheet.type === 'howto') {
+    body = viewHowto();
   } else if (S.sheet.type === 'pick') {
     body = viewPickSheet();
   } else if (S.sheet.type === 'program-choose') {
