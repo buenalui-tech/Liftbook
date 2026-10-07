@@ -571,8 +571,10 @@ test('form videos: pasted YouTube links resolve to an id, saved videos win over 
     'https://www.youtube.com/shorts/vcBig73ojpE', 'https://www.youtube-nocookie.com/embed/vcBig73ojpE?rel=0', ' vcBig73ojpE '])
     assert.equal(T.ytId(link), 'vcBig73ojpE', link);
   for (const bad of ['', 'bench press', 'https://example.com/watch', 'https://youtu.be/short']) assert.equal(T.ytId(bad), null, bad);
-  // every template exercise has a suggested video, keyed by the same id the workout uses
-  for (const r of T.TEMPLATE.routines) for (const ex of r.exercises) assert.match(T.FORM_VIDEOS[ex.id] || '', /^[\w-]{11}$/, ex.name);
+  // every template and exercise-bank exercise has a suggested video, keyed by the same id the workout uses
+  for (const ex of [...T.TEMPLATE.routines.flatMap(r => r.exercises), ...T.CATALOG]) assert.match(T.FORM_VIDEOS[ex.id] || '', /^[\w-]{11}$/, ex.name);
+  const names = new Set([...T.TEMPLATE.routines.flatMap(r => r.exercises), ...T.CATALOG].map(ex => ex.id));
+  for (const id of Object.keys(T.FORM_VIDEOS)) assert.ok(names.has(id), `video for an exercise that doesn't exist: ${id}`);
   assert.equal(T.formVideo('bench-press-barbell'), 'vcBig73ojpE');
   T.S.profile.videos = {'bench-press-barbell': 'aaaaaaaaaaa', 'my-custom-lift': 'bbbbbbbbbbb'};
   assert.equal(T.formVideo('bench-press-barbell'), 'aaaaaaaaaaa');
