@@ -26,8 +26,11 @@ const A = {
   discard: () => { if (!arm('discard')) return; disarm(); discardWorkout(); },
   'sheet-close': () => { S.sheet = null; disarm(); render(); },
   scrim: (d, ev) => { if (S.sheet && (S.sheet.edit || S.sheet.type === 'timer-setup')) return;   // don't drop unsaved edits on a stray tap
-    if (ev.target.classList.contains('scrim')) { S.sheet = null; disarm(); render(); } },
-  'howto': d => { S.sheet = {type: 'howto', exId: d.v, name: d.n}; render(); },
+    if (ev.target.classList.contains('scrim')) { S.sheet = S.sheet && S.sheet.type === 'howto' && S.sheet.back || null; disarm(); render(); } },
+  // a video opened from a list (adding an exercise) goes back to that list when it closes
+  'howto': d => { S.sheet = {type: 'howto', exId: d.v, name: d.n, back: S.sheet && S.sheet.type !== 'howto' ? S.sheet : null}; render(); },
+  'howto-close': () => { S.sheet = S.sheet.back || null; render(); },
+  'day-peek': d => { S.peekDay = S.peekDay === d.v ? null : d.v; render(); },
   'howto-save': () => {
     const i = document.getElementById('howto-link'), id = ytId(i && i.value);
     if (!id) { toast('That isn’t a YouTube link. In YouTube tap Share → Copy link, then paste it here'); return; }

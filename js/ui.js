@@ -118,12 +118,16 @@ function viewToday() {
     const nr = nextRoutine();
     const list = nr && !nr.exercises.length && nr.timer ? timerOutline(nr.timer) : nr ? nr.exercises.map(ex => {
       const s = suggest(ex), tgt = `${ex.sets} × ${rangeText(ex)}${ex.timed ? 's' : ''}`;
-      return `<li><span class="nm">${esc(ex.name)}</span><span class="tg num">${tgt}</span><span class="ht ${s.tone}">${s.w != null ? `<b>${fmtW(s.w)} ${unit()}</b> · ` : ''}${esc(s.text)}</span></li>`;
+      return `<li><span class="nm">${esc(ex.name)}${playBtn(ex.id, ex.name)}</span><span class="tg num">${tgt}</span><span class="ht ${s.tone}">${s.w != null ? `<b>${fmtW(s.w)} ${unit()}</b> · ` : ''}${esc(s.text)}</span></li>`;
     }).join('') + (nr.timer ? `<li><span class="nm">Finisher: ${esc(specName(nr.timer))}</span><span class="tg num">${fmtDur(specSecs(nr.timer))}</span><span class="ht">${esc(specDetail(nr.timer))}</span></li>` : '') : '';
-    const others = (S.program ? S.program.routines : []).filter(r => !nr || r.id !== nr.id).map(r => `
-      <div class="routine-row"><span class="tag">${esc(r.tag || r.name.slice(0,2).toUpperCase())}</span>
-        <div class="grow"><div style="font-weight:600">${esc(r.name)}</div><div class="small muted">${[r.focus, routineSummary(r)].filter(Boolean).map(esc).join(' · ')}</div></div>
-        <button class="btn" data-act="start" data-v="${esc(r.id)}">Start</button></div>`).join('');
+    // any other day can be opened to see its exercises (and their videos) before starting it
+    const others = (S.program ? S.program.routines : []).filter(r => !nr || r.id !== nr.id).map(r => {
+      const open = S.peekDay === r.id;
+      return `<div class="routine-row"><span class="tag">${esc(r.tag || r.name.slice(0,2).toUpperCase())}</span>
+        <button class="grow day-peek" data-act="day-peek" data-v="${esc(r.id)}" aria-expanded="${open}"><span class="stack" style="gap:0"><span style="font-weight:600">${esc(r.name)}</span><span class="small muted">${[r.focus, routineSummary(r)].filter(Boolean).map(esc).join(' · ')}</span></span><span class="chev" aria-hidden="true">›</span></button>
+        <button class="btn" data-act="start" data-v="${esc(r.id)}">Start</button></div>
+      ${open ? `<ul class="plan peek">${r.exercises.map(ex => `<li><span class="nm">${esc(ex.name)}${playBtn(ex.id, ex.name)}</span><span class="tg num">${ex.sets} × ${rangeText(ex)}${ex.timed ? 's' : ''}</span></li>`).join('')}${r.timer ? `<li><span class="nm">${r.exercises.length ? 'Finisher: ' : ''}${esc(specName(r.timer))}</span><span class="tg num">${fmtDur(specSecs(r.timer))}</span></li>` : ''}</ul>` : ''}`;
+    }).join('');
     plan = `${nr ? `<section class="card next">
         <div class="row between"><div class="stack"><p class="eyebrow">Up next${nr.focus ? ' · ' + esc(nr.focus) : ''}</p><h2>${esc(nr.name)}</h2></div><span class="tag">${esc(nr.tag || '')}</span></div>
         <ul class="plan">${list}</ul>
@@ -342,7 +346,7 @@ function viewWorkout() {
         <button class="btn danger ${S.armed === 'rmex' + ei ? 'armed' : ''}" data-act="ex-remove" data-e="${ei}">${S.armed === 'rmex' + ei ? 'Tap again to remove' : 'Remove exercise'}</button></div>` : '';
     return `<section class="card ex">
       <div class="ex-head"><div class="grow stack" style="gap:2px"><h3>${esc(e.name)}</h3><span class="ex-meta num">${e.target || e.sets.length} × ${rangeText(e)}${e.timed ? 's' : ''} · rest ${fmtDur(e.rest)} · ${esc(e.muscle || '')}</span></div>
-      <button class="iconbtn" data-act="howto" data-v="${esc(e.exId)}" data-n="${esc(e.name)}" aria-label="How to do ${esc(e.name)}">${ICON.play}</button>
+      ${playBtn(e.exId, e.name, true)}
       <button class="iconbtn ${e.note ? 'has-note' : ''}" data-act="ex-note" data-e="${ei}" aria-label="${e.note ? 'Edit note' : 'Add a note'}">${ICON_NOTE}</button>
       <button class="iconbtn" data-act="ex-menu" data-e="${ei}" aria-label="Exercise options">${ICON.dots}</button></div>
       ${menu}
@@ -388,7 +392,7 @@ function viewSheet() {
     const lib = libraryExercises().filter(x => !q || x.name.toLowerCase().includes(q));
     body = `<div class="row between"><h2>Add exercise</h2><button class="iconbtn" data-act="sheet-close" aria-label="Close">✕</button></div>
       <label class="field">Search or type a new name<input id="add-q" data-in="add-q" value="${esc(S.sheet.q || '')}" placeholder="e.g. Cable fly" autocomplete="off"></label>
-      <div class="lib">${lib.map(x => `<button data-act="add-ex" data-v="${esc(x.id)}"><span>${esc(x.name)}</span><span class="muted small">${esc(x.muscle || '')}</span></button>`).join('') || '<div class="muted small" style="padding:12px">No match in your library.</div>'}</div>
+      <div class="lib">${lib.map(x => `<div class="lib-row"><button data-act="add-ex" data-v="${esc(x.id)}"><span>${esc(x.name)}</span><span class="muted small">${esc(x.muscle || '')}</span></button>${playBtn(x.id, x.name)}</div>`).join('') || '<div class="muted small" style="padding:12px">No match in your library.</div>'}</div>
       ${q ? `<div class="row"><label class="field grow">Muscle<select id="add-m">${MUSCLES.map(m => `<option>${m}</option>`).join('')}</select></label><label class="field grow">Equipment<select id="add-k">${KINDS.map(k => `<option>${k}</option>`).join('')}</select></label></div>
       <button class="btn primary block" data-act="add-custom">Add “${esc(S.sheet.q)}” as a new exercise</button>` : ''}`;
   } else if (S.sheet.type === 'share') {
@@ -440,7 +444,7 @@ function viewSheet() {
   } else if (S.sheet.type === 'detail') {
     const w = S.workouts.find(x => x.id === S.sheet.id); if (!w) { S.sheet = null; return ''; }
     const {v, sets} = volume(w);
-    const exs = w.exercises.map(e => `<div class="stack"><div class="row between"><b>${esc(e.name)}</b>${(w.prs || []).includes(e.exId) ? '<span class="chip pr">PR</span>' : ''}</div>
+    const exs = w.exercises.map(e => `<div class="stack"><div class="row between"><span class="row" style="gap:4px"><b>${esc(e.name)}</b>${playBtn(e.exId, e.name)}</span>${(w.prs || []).includes(e.exId) ? '<span class="chip pr">PR</span>' : ''}</div>
       ${e.note ? `<div class="prev-note">${esc(e.note)}</div>` : ''}
       <table class="dtable num"><tbody>${e.sets.map((s, i) => `<tr><td class="muted">${s.warm ? 'Warm-up' : 'Set ' + (i + 1)}</td><td>${e.timed ? `${s.r}s` : (s.w ? `${fmtW(conv(s.w, w.unit))} ${unit()} × ${s.r}` : `${s.r} reps`)}</td></tr>`).join('')}</tbody></table></div>`).join('');
     body = `<div class="row between"><div class="stack"><p class="eyebrow">${fmtDate(w.startedAt)}</p><h2>${esc(w.routineName)}</h2></div><button class="iconbtn" data-act="sheet-close" aria-label="Close">✕</button></div>

@@ -28,7 +28,7 @@ function loadApp(stored = {}, extra = {}) {
   vm.createContext(ctx);
   // top-level const/let live in the context's script scope; expose the names tests need
   const src = FILES.map(f => fs.readFileSync(new URL(`../js/${f}.js`, import.meta.url), 'utf8')).join('\n;\n') +
-    '\n;globalThis.T = {S, store, suggest, e1rm, niceTicks, weightSeries, weeklyRateKg, caloriesFor, improvements, recomputePRs, muscleLoad, musclesFor, tagFor, lastPerf, scanKg, conv, TEMPLATE, CATALOG, slug, startOfDay, fromUsda, fromOff, rankFoods, unitsFor, portionTotals, autoTargets, dayTotals, estimateBurn, targets, targetsFromBurn, computeTargets, nutritionPrefs, proposeTargets, applyCheckin, runAutoCheckin, checkinDue, copyMeal, foodLogs, viewToday, viewFood, viewProgress, viewBody, viewProgram, viewSheet, viewWorkout, startWorkout, viewSettings, buildPhases, Timer, viewTimer, viewTimerSetup, viewMobilitySetup, MOBILITY, viewTrainingLoad, sessionLoad, specFromVals, specToSheet, cleanSpec, specSecs, finishWorkout, timerOutline, viewTimerSetup, microFromUsda, microFromOff, entryMicro, viewMicros, Micro, fromUsda, portionMicros, Scale, esnParse, esnPacket, openPortion, viewPortion, A, viewSettings, matchesQuery, localMatches, searchResultsHTML, onFoodQuery, rememberSearch, searchCache, viewAddFood, ytId, formVideo, FORM_VIDEOS, viewHowto, holdForVideo, TEMPLATE_COPY: () => JSON.parse(JSON.stringify(TEMPLATE))};';
+    '\n;globalThis.T = {S, store, suggest, e1rm, niceTicks, weightSeries, weeklyRateKg, caloriesFor, improvements, recomputePRs, muscleLoad, musclesFor, tagFor, lastPerf, scanKg, conv, TEMPLATE, CATALOG, slug, startOfDay, fromUsda, fromOff, rankFoods, unitsFor, portionTotals, autoTargets, dayTotals, estimateBurn, targets, targetsFromBurn, computeTargets, nutritionPrefs, proposeTargets, applyCheckin, runAutoCheckin, checkinDue, copyMeal, foodLogs, viewToday, viewFood, viewProgress, viewBody, viewProgram, viewSheet, viewWorkout, startWorkout, viewSettings, buildPhases, Timer, viewTimer, viewTimerSetup, viewMobilitySetup, MOBILITY, viewTrainingLoad, sessionLoad, specFromVals, specToSheet, cleanSpec, specSecs, finishWorkout, timerOutline, viewTimerSetup, microFromUsda, microFromOff, entryMicro, viewMicros, Micro, fromUsda, portionMicros, Scale, esnParse, esnPacket, openPortion, viewPortion, A, viewSettings, matchesQuery, localMatches, searchResultsHTML, onFoodQuery, rememberSearch, searchCache, viewAddFood, ytId, formVideo, FORM_VIDEOS, viewHowto, holdForVideo, playBtn, TEMPLATE_COPY: () => JSON.parse(JSON.stringify(TEMPLATE))};';
   vm.runInContext(src, ctx, {filename: 'liftbook.js'});
   return ctx.T;
 }
@@ -587,4 +587,29 @@ test('form videos: pasted YouTube links resolve to an id, saved videos win over 
   assert.match(html, /Remove this video/);
   T.S.sheet = {type: 'howto', exId: 'nothing-here', name: 'Nothing'};
   assert.doesNotMatch(T.viewHowto(), /iframe/);
+});
+
+test('form videos: a play button wherever an exercise is listed, including before the workout', () => {
+  const T = loadApp();
+  T.S.program = T.TEMPLATE_COPY();
+  // only exercises with a video get the filled button in lists; editing places offer an outline one to add a video
+  assert.ok(T.playBtn('bench-press-barbell', 'Bench').includes('play-btn '));
+  assert.equal(T.playBtn('my-custom-lift', 'Mine'), '');
+  assert.ok(T.playBtn('my-custom-lift', 'Mine', true).includes('play-btn empty'));
+  // Today: the up-next list, and any other day opened for a look
+  const today = T.viewToday(), nr = T.S.program.routines[0];
+  assert.equal((today.match(/class="play-btn /g) || []).length, nr.exercises.length, 'every exercise up next has a play button');
+  const other = T.S.program.routines[1];
+  assert.ok(!T.viewToday().includes('plan peek'));
+  T.A['day-peek']({v: other.id});
+  assert.ok(T.viewToday().includes('plan peek') && T.viewToday().includes(other.exercises[0].name));
+  // from the add-exercise list, the video opens and closing it goes back to the list
+  T.startWorkout(nr.id);
+  T.S.sheet = {type: 'add-ex', q: ''};
+  assert.ok(T.viewSheet().includes('lib-row'));
+  const list = T.S.sheet;
+  T.A.howto({v: 'squat-barbell', n: 'Squat (Barbell)'});
+  assert.equal(T.S.sheet.type, 'howto');
+  T.A['howto-close']();
+  assert.equal(T.S.sheet, list);
 });

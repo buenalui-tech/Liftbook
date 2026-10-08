@@ -95,10 +95,20 @@ function ytId(text) {
 const ownVideo = exId => (S.profile.videos || {})[exId] || null;
 const formVideo = exId => ownVideo(exId) || FORM_VIDEOS[exId] || null;
 
+/* The play button: a filled circle with a play mark wherever an exercise has a video, so it reads as
+   "there's a video here" at a glance. Where you set up or do the exercise (the workout, the program editor),
+   an exercise without one gets an outline button that opens the sheet to add one. */
+const PLAY_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="11"/><path d="M10 7.6v8.8l6.8-4.4z"/></svg>';
+function playBtn(exId, name, always) {
+  const has = !!formVideo(exId);
+  if (!has && !always) return '';
+  return `<button class="play-btn ${has ? '' : 'empty'}" data-act="howto" data-v="${esc(exId)}" data-n="${esc(name)}" aria-label="${has ? 'Watch how to do' : 'Add a form video for'} ${esc(name)}">${PLAY_SVG}</button>`;
+}
+
 function viewHowto() {
   const sh = S.sheet, id = formVideo(sh.exId), own = ownVideo(sh.exId);
   const search = 'https://www.youtube.com/results?search_query=' + encodeURIComponent(sh.name + ' proper form');
-  return `<div class="row between"><div class="stack"><p class="eyebrow">How to</p><h2>${esc(sh.name)}</h2></div><button class="iconbtn" data-act="sheet-close" aria-label="Close">✕</button></div>
+  return `<div class="row between"><div class="stack"><p class="eyebrow">How to</p><h2>${esc(sh.name)}</h2></div><button class="iconbtn" data-act="howto-close" aria-label="${sh.back ? 'Back' : 'Close'}">✕</button></div>
     ${id ? `<div class="video" id="howto-video" data-v="${esc(id)}"><iframe src="https://www.youtube-nocookie.com/embed/${esc(id)}?rel=0&playsinline=1&modestbranding=1"
         title="${esc(sh.name)} form video" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
         referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe></div>

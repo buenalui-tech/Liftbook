@@ -25,7 +25,7 @@ function viewProgramBuilder() {
       <button class="btn" data-act="edit-routine" data-v="${esc(r.id)}">Edit</button></div>`;
     const rows = r.exercises.map((ex, xi) => `<div class="edrow">
       <div class="row between"><b>${esc(ex.name)}</b><div class="row" style="gap:0">
-        <button class="iconbtn" data-act="howto" data-v="${esc(ex.id)}" data-n="${esc(ex.name)}" aria-label="How to do ${esc(ex.name)}">${ICON.play}</button>
+        ${playBtn(ex.id, ex.name, true)}
         <button class="iconbtn" data-act="p-up" data-r="${ri}" data-x="${xi}" aria-label="Move up" ${xi ? '' : 'disabled'}>↑</button>
         <button class="iconbtn" data-act="p-rm" data-r="${ri}" data-x="${xi}" aria-label="Remove ${esc(ex.name)}" style="color:${S.armed === `prm${ri}-${xi}` ? 'var(--pr)' : 'inherit'}">${S.armed === `prm${ri}-${xi}` ? '✓?' : '✕'}</button></div></div>
       <div class="ednums">
@@ -65,7 +65,7 @@ function viewPickSheet() {
   const day = S.program.routines[sh.r];
   return `<div class="row between"><h2>Add to ${esc(day.name)}</h2><button class="iconbtn" data-act="sheet-close" aria-label="Close">✕</button></div>
     <label class="field">Search by name or muscle<input id="pick-q" data-in="pick-q" value="${esc(sh.q || '')}" placeholder="Row, chest, curl…" autocomplete="off"></label>
-    <div class="lib">${lib.map(x => `<button data-act="pick-ex" data-v="${esc(x.id)}"><span>${esc(x.name)}</span><span class="muted small">${esc(x.muscle || '')}</span></button>`).join('') || '<div class="muted small" style="padding:12px">Nothing matches. Create it below.</div>'}</div>
+    <div class="lib">${lib.map(x => `<div class="lib-row"><button data-act="pick-ex" data-v="${esc(x.id)}"><span>${esc(x.name)}</span><span class="muted small">${esc(x.muscle || '')}</span></button>${playBtn(x.id, x.name)}</div>`).join('') || '<div class="muted small" style="padding:12px">Nothing matches. Create it below.</div>'}</div>
     <details ${q && !lib.length ? 'open' : ''}><summary class="small muted">Create your own exercise</summary>
       <div class="stack" style="gap:10px;margin-top:8px">
         <label class="field">Name<input id="pick-name" value="${esc(sh.q || '')}" placeholder="Landmine press"></label>

@@ -421,5 +421,21 @@ textarea.note-in{width:100%;border:1px solid var(--line);border-radius:8px;backg
 .sc-steady{color:var(--good);font-weight:600}
 .weigh-btn svg,.banner svg{width:18px;height:18px;vertical-align:-3px;margin-right:4px}
 .btn svg{width:18px;height:18px;vertical-align:-3px}
+/* form videos: the play button */
+.play-btn{width:40px;height:40px;margin:-8px -6px -8px 0;padding:0;border:0;background:transparent;display:inline-grid;place-items:center;flex:none;vertical-align:middle;cursor:pointer}
+.play-btn svg{width:26px;height:26px}
+.play-btn circle{fill:var(--accent)}
+.play-btn path{fill:var(--accent-ink)}
+.play-btn.empty circle{fill:none;stroke:var(--muted);stroke-width:1.5}
+.play-btn.empty path{fill:var(--muted)}
+.plan .nm{display:flex;align-items:center;gap:4px}
+.lib .lib-row{display:flex;align-items:center;border-top:1px solid var(--line)}
+.lib .lib-row:first-child{border-top:0}
+.lib .lib-row>button:first-child{flex:1;border-top:0;min-width:0}
+.lib .play-btn{margin:0 6px 0 0;padding:0;border:0}
+.day-peek{display:flex;align-items:center;justify-content:space-between;gap:8px;background:transparent;border:0;padding:0;text-align:left;color:inherit;min-width:0}
+.day-peek .chev{font-size:22px;color:var(--muted);transition:transform .15s}
+.day-peek[aria-expanded="true"] .chev{transform:rotate(90deg)}
+.plan.peek{padding:0 0 10px 44px}
 .toast{position:fixed;left:50%;transform:translateX(-50%);top:calc(12px + env(safe-area-inset-top,0px));z-index:20;background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:10px;font-weight:600;font-size:14px;max-width:calc(100% - 32px)}
 @media (prefers-reduced-motion: no-preference){.set.done{transition:background .2s}.rest .fill{transition:width .25s linear}}
