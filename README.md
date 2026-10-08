@@ -23,6 +23,9 @@ A workout log that runs in your phone's browser and installs to the home screen.
 | `supabase/setup.sql` | Database tables and privacy rules for a new project. Run once in the Supabase SQL Editor (not used by the site) |
 | `supabase/002_body_entries.sql` | Adds the weigh-in and scan table to an existing project |
 | `supabase/003_feedback_and_errors.sql`, `004_food_entries.sql` | Feedback/crash tables; food log table |
+| `supabase/005_delete_account.sql` | Lets people delete their own account from Settings (App Store requirement) |
+| `privacy.html` | Privacy policy, linked from Settings and the sign-in form |
+| `LICENSE` | All rights reserved: the code is public for hosting only |
 | `tests/` | `node --test tests/app.test.mjs` runs the logic tests; `make_harness.py` builds a copy wired to a fake Supabase (not used by the site) |
 | `icon-192.png`, `icon-512.png`, `apple-touch-icon.png` | App icons, drawn by `tools/make_icons.py` |
 

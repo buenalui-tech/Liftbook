@@ -438,6 +438,18 @@ function viewSheet() {
       <button class="btn primary block" data-act="meal-save">Save meal</button>`;
   } else if (S.sheet.type === 'feedback') {
     body = viewFeedbackSheet();
+  } else if (S.sheet.type === 'new-password') {
+    body = `<div class="row between"><h2>${S.sheet.change ? 'Change password' : 'Set a new password'}</h2><button class="iconbtn" data-act="sheet-close" aria-label="Close">✕</button></div>
+      <label class="field">New password (at least 6 characters)<input id="pw-new" type="password" autocomplete="new-password" minlength="6"></label>
+      ${S.sheet.msg ? `<p class="small" style="margin:0;color:var(--pr)">${esc(S.sheet.msg)}</p>` : ''}
+      <button class="btn primary lg block" data-act="pw-save" ${S.sheet.busy ? 'disabled' : ''}>Save password</button>`;
+  } else if (S.sheet.type === 'delete-account') {
+    body = `<div class="row between"><h2>Delete your account?</h2><button class="iconbtn" data-act="sheet-close" aria-label="Close">✕</button></div>
+      <p style="margin:0">This permanently deletes your Liftbook account and everything synced to it: program, workouts, weigh-ins, scans, food log, recipes and settings. It can’t be undone.</p>
+      <p class="small muted" style="margin:0">Want a copy first? Settings → Backups → Export backup. Feedback you sent is kept, but no longer linked to you.</p>
+      ${S.sheet.msg ? `<p class="small" style="margin:0;color:var(--pr)">${esc(S.sheet.msg)}</p>` : ''}
+      <button class="btn danger block ${S.armed === 'acctdel' ? 'armed' : ''}" data-act="acct-delete" ${S.sheet.busy ? 'disabled' : ''}>${S.sheet.busy ? 'Deleting…' : S.armed === 'acctdel' ? 'Tap again to delete everything' : 'Delete my account and data'}</button>
+      <button class="btn block" data-act="sheet-close">Keep my account</button>`;
   } else if (S.sheet.type === 'collection') {
     body = viewCollection();
   } else if (S.sheet.type === 'howto') {

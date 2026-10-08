@@ -118,7 +118,7 @@ function viewSettings() {
     <section class="card row between" style="flex-direction:row;align-items:center"><div class="stack" style="gap:2px"><h3>Help shape Liftbook</h3><span class="small muted">Found a bug or have an idea?</span></div><button class="btn primary" data-act="feedback-open">Send feedback</button></section>
 
     <section class="card"><h3>About</h3>
-      <p class="small muted" style="margin:0">Liftbook version ${APP_VERSION}.</p>
+      <p class="small muted" style="margin:0">Liftbook version ${APP_VERSION}. <a href="privacy.html" target="_blank" rel="noopener">Privacy policy</a>.</p>
       <p class="small muted" style="margin:0">3D muscle figure adapted from <a href="https://github.com/Z-Anatomy/Models-of-human-anatomy" target="_blank" rel="noopener">Z-Anatomy</a> (CC BY-SA 4.0) and <a href="https://dbarchive.biosciencedbc.jp/en/bodyparts3d/" target="_blank" rel="noopener">BodyParts3D</a>, The Database Center for Life Science (CC BY-SA 2.1 JP). The adapted figure is shared under <a href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank" rel="noopener">CC BY-SA 4.0</a>. Food data from <a href="https://fdc.nal.usda.gov/" target="_blank" rel="noopener">USDA FoodData Central</a> and <a href="https://world.openfoodfacts.org/" target="_blank" rel="noopener">Open Food Facts</a> (ODbL).</p>
     </section>
   </div>`;

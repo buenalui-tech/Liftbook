@@ -2,7 +2,7 @@
 // Classic script: files load in order (see index.html) and share top-level names.
 
 /* ---------- helpers ---------- */
-const APP_VERSION = '39';   // keep in step with VERSION in sw.js (liftbook-v39)
+const APP_VERSION = '40';   // keep in step with VERSION in sw.js (liftbook-v40)
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 const slug = s => String(s).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'exercise';
@@ -186,17 +186,21 @@ const Sync = {
   configured() { return !!(CFG.supabaseUrl && CFG.supabaseAnonKey && window.supabase && window.supabase.createClient); },
   async init() {
     if (!this.configured()) return;
+    // a password-reset link lands here with "type=recovery" in the address: ask for the new password once signed in
+    const recovering = /type=recovery/.test(location.hash);
     try {
       this.client = window.supabase.createClient(CFG.supabaseUrl, CFG.supabaseAnonKey, {auth: {persistSession: true, autoRefreshToken: true, detectSessionInUrl: true}});
       const {data} = await this.client.auth.getSession();
       this.user = data.session ? data.session.user : null;
     } catch (e) { console.warn('sync init', e); return; }
     // Supabase warns against awaiting its own calls inside this callback, so hand off with setTimeout
-    this.client.auth.onAuthStateChange((_ev, session) => {
+    this.client.auth.onAuthStateChange((ev, session) => {
       const u = session ? session.user : null, changed = (u && u.id) !== (this.user && this.user.id);
       this.user = u;
+      if (ev === 'PASSWORD_RECOVERY') setTimeout(() => { S.sheet = {type: 'new-password'}; render(); }, 0);
       if (changed) setTimeout(() => { u ? this.onSignedIn() : this.set('off'); render(); }, 0);
     });
+    if (recovering && this.user) setTimeout(() => { S.sheet = {type: 'new-password'}; render(); }, 0);
     window.addEventListener('online', () => this.run(true));
     document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') this.run(true); });
     if (this.user) this.onSignedIn();
@@ -316,7 +320,11 @@ const Sync = {
   },
   async signIn(email, password) { return this.client.auth.signInWithPassword({email, password}); },
   async signUp(email, password) { return this.client.auth.signUp({email, password, options: {emailRedirectTo: location.href.split('#')[0]}}); },
-  async signOut() { await this.client.auth.signOut(); this.user = null; this.set('off'); }
+  async signOut() { await this.client.auth.signOut(); this.user = null; this.set('off'); },
+  async resetPassword(email) { return this.client.auth.resetPasswordForEmail(email, {redirectTo: location.href.split('#')[0]}); },
+  async updatePassword(password) { return this.client.auth.updateUser({password}); },
+  // removes the sign-in and every synced row (they cascade); see supabase/005_delete_account.sql
+  async deleteAccount() { return this.client.rpc('delete_my_account'); }
 };
 // a table the database doesn't have yet (setup.sql not re-run): skip it, keep the rest syncing
 const tableMissing = e => e && (e.code === 'PGRST205' || e.code === '42P01' || /schema cache|does not exist/i.test(e.message || ''));

@@ -73,6 +73,39 @@ const A = {
   },
   'dismiss-summary': () => { S.summary = null; render(); },
   'sync-now': () => Sync.run(true),
+  'pw-forgot': async () => {
+    const email = ((document.getElementById('auth-email') || {}).value || '').trim(); S.authEmail = email;
+    if (!email) { S.authMsg = 'Type your email above, then tap Forgot password.'; render(); return; }
+    S.authBusy = true; render();
+    try { const {error} = await Sync.resetPassword(email); S.authMsg = error ? error.message : `✓ If ${email} has an account, a reset link is on its way. Open it on this phone.`; }
+    catch { S.authMsg = 'Couldn’t reach the server. Try again in a moment.'; }
+    S.authBusy = false; render();
+  },
+  'pw-change': () => { S.sheet = {type: 'new-password', change: true}; render(); },
+  'pw-save': async () => {
+    const pw = (document.getElementById('pw-new') || {}).value || '', sh = S.sheet;
+    if (pw.length < 6) { sh.msg = 'Use at least 6 characters.'; render(); return; }
+    sh.busy = true; sh.msg = ''; render();
+    try { const {error} = await Sync.updatePassword(pw); if (error) { sh.busy = false; sh.msg = error.message; render(); return; } }
+    catch { sh.busy = false; sh.msg = 'Couldn’t reach the server. Try again in a moment.'; render(); return; }
+    if (location.hash) history.replaceState(null, '', location.href.split('#')[0]);
+    S.sheet = null; render(); toast('Password saved');
+  },
+  'acct-delete-open': () => { S.sheet = {type: 'delete-account'}; disarm(); render(); },
+  'acct-delete': async () => {
+    if (!arm('acctdel')) return; disarm();
+    const sh = S.sheet; sh.busy = true; sh.msg = ''; render();
+    let res; try { res = await Sync.deleteAccount(); } catch { res = {error: {message: 'Couldn’t reach the server. Try again when you’re online.'}}; }
+    if (res.error) {
+      sh.busy = false;
+      sh.msg = /delete_my_account|PGRST202|42883|function/i.test(res.error.message + res.error.code) ? 'Account deletion isn’t switched on yet. Run supabase/005_delete_account.sql in Supabase, then try again.' : res.error.message;
+      render(); return;
+    }
+    // the account is gone: clear this phone too and start fresh
+    try { await Sync.client.auth.signOut({scope: 'local'}); } catch {}
+    try { localStorage.removeItem('liftbook.v1'); } catch {}
+    location.reload();
+  },
   rpe: d => {
     const n = +d.v, set = o => { o.rpe = o.rpe === n ? null : n; };
     if (d.t === 'active' && S.active) { set(S.active); saveActiveSoon(); }

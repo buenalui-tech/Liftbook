@@ -1,0 +1,10 @@
+Copyright (c) 2026 buenalui-tech. All rights reserved.
+
+This repository is public so the app can be hosted, not because its code is free to reuse.
+No permission is granted to copy, modify, publish, distribute, sublicense or sell this code, or
+any app built from it, in whole or in part, without written permission from the copyright holder.
+
+Third-party material in this repository keeps its own license:
+- figure.glb is adapted from Z-Anatomy (CC BY-SA 4.0) and BodyParts3D, The Database Center for
+  Life Science (CC BY-SA 2.1 JP). The adapted figure is shared under CC BY-SA 4.0; see figure.LICENSE.txt.
+- Libraries loaded at runtime (Supabase JS, three.js, ZXing) are not included here and keep their own licenses.

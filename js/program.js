@@ -100,6 +100,7 @@ function viewAccount() {
     <div class="stack"><span>Signed in as <b>${esc(Sync.user.email || '')}</b></span><span class="small muted" id="sync-status">${esc(syncStatusText())}</span></div>
     <p class="small muted">Every change saves on this phone first, then uploads to your account. Sign in on another phone or computer to see the same log.</p>
     <div class="row" style="flex-wrap:wrap"><button class="btn" data-act="sync-now">Sync now</button><button class="btn ${S.armed === 'signout' ? 'danger armed' : ''}" data-act="sign-out">${S.armed === 'signout' ? 'Tap again to sign out' : 'Sign out'}</button></div>
+    <div class="row" style="flex-wrap:wrap;gap:4px"><button class="btn ghost" data-act="pw-change" style="padding-left:0">Change password</button><button class="btn ghost" data-act="acct-delete-open" style="color:var(--pr)">Delete account</button></div>
   </section>`;
   return `<section class="card"><h3>Account &amp; sync</h3>
     <p class="small muted">Sign in to back up your log automatically and use it on more than one device.${S.workouts.length ? ` The ${S.workouts.length} workout${S.workouts.length === 1 ? '' : 's'} on this phone will upload to your account.` : ''}</p>
@@ -108,6 +109,7 @@ function viewAccount() {
       <label class="field">Password<input id="auth-pw" type="password" autocomplete="current-password" minlength="6" required></label>
       ${S.authMsg ? `<p class="small" style="margin:0;color:${S.authMsg.startsWith('✓') ? 'var(--good)' : 'var(--pr)'}">${esc(S.authMsg)}</p>` : ''}
       <div class="row"><button class="btn primary grow" type="submit" data-mode="in" ${S.authBusy ? 'disabled' : ''}>Sign in</button><button class="btn grow" type="submit" data-mode="up" ${S.authBusy ? 'disabled' : ''}>Create account</button></div>
+      <div class="row between small"><button class="linkbtn" type="button" data-act="pw-forgot">Forgot password?</button><a class="muted" href="privacy.html" target="_blank" rel="noopener">Privacy</a></div>
     </form>
   </section>`;
 }

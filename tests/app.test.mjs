@@ -723,3 +723,11 @@ test('fast logging: + adds last time’s amount and can be undone; the calorie l
   const html = T.viewFood();
   assert.ok(html.includes('cal-line') && html.includes('Remaining') && html.includes('2,400'));
 });
+
+test('account: forgot password, change password and delete account are reachable', () => {
+  const T = loadApp();
+  T.S.sheet = {type: 'new-password'}; assert.ok(T.viewSheet().includes('Set a new password'));
+  T.S.sheet = {type: 'delete-account'}; assert.ok(T.viewSheet().includes('Delete my account and data'));
+  T.S.sheet = null;
+  assert.ok(T.viewSettings().includes('privacy.html'), 'the privacy policy is linked from Settings');
+});
