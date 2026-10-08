@@ -375,7 +375,7 @@ document.addEventListener('submit', ev => {
 });
 function stepDay(n) {
   const today = startOfDay(Date.now()), next = startOfDay((S.day || today) + n * DAY + 12 * 3600000);
-  if (next > today) return;
+  if (next > startOfDay(today + DAY + 12 * 3600000)) return;   // one day ahead: tomorrow's plan
   S.day = next; render();
 }
 // swipe left/right anywhere on the Today tab (outside the 3D figure) to move between days

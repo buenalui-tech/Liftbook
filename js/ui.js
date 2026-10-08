@@ -93,33 +93,39 @@ function entryCard(w, withDate) {
     <div class="kv num">${withDate ? `<span>${fmtDate(w.startedAt)}</span>` : ''}${entrySummary(w).map((x, i) => i ? `<span>${esc(x)}</span>` : `<span><b>${esc(x)}</b></span>`).join('')}</div>
     ${isActivity(w) ? (w.notes ? `<div class="small muted">${esc(w.notes)}</div>` : '') : `<div class="small muted">${[...w.exercises.map(e => esc(e.name.replace(/ \(.*\)$/, ''))), w.conditioning ? '+ ' + esc(w.conditioning.name) : ''].filter(Boolean).join(' · ')}</div>`}</button>`;
 }
+// a day's exercises with targets, today's suggested weights and the play button for each form video
+function planList(r) {
+  if (!r) return '';
+  if (!r.exercises.length && r.timer) return timerOutline(r.timer);
+  return r.exercises.map(ex => {
+    const s = suggest(ex), tgt = `${ex.sets} × ${rangeText(ex)}${ex.timed ? 's' : ''}`;
+    return `<li><span class="nm">${esc(ex.name)}${playBtn(ex.id, ex.name)}</span><span class="tg num">${tgt}</span><span class="ht ${s.tone}">${s.w != null ? `<b>${fmtW(s.w)} ${unit()}</b> · ` : ''}${esc(s.text)}</span></li>`;
+  }).join('') + (r.timer ? `<li><span class="nm">Finisher: ${esc(specName(r.timer))}</span><span class="tg num">${fmtDur(specSecs(r.timer))}</span><span class="ht">${esc(specDetail(r.timer))}</span></li>` : '');
+}
 function viewToday() {
-  const now = Date.now(), today = startOfDay(now);
-  if (!S.day || S.day > today) S.day = today;
-  const day = S.day, isToday = day === today, wk = startOfWeek(day);
+  const now = Date.now(), today = startOfDay(now), tomorrow = startOfDay(today + DAY + 12 * 3600000);
+  if (!S.day || S.day > tomorrow) S.day = today;
+  const day = S.day, isToday = day === today, isTomorrow = day === tomorrow, wk = startOfWeek(day);
   const kinds = {};
   for (const w of S.workouts) { const d = startOfDay(w.startedAt); (kinds[d] = kinds[d] || new Set()).add(isActivity(w) ? 'a' : 's'); }
   const days = ['M','T','W','T','F','S','S'].map((d, i) => {
-    const t = wk + i * DAY, k = kinds[t] || new Set(), future = t > today;
+    const t = wk + i * DAY, k = kinds[t] || new Set(), future = t > tomorrow;
     return `<button class="day ${k.has('s') ? 'done' : ''} ${k.has('a') && !k.has('s') ? 'act' : ''} ${t === today ? 'today' : ''} ${t === day ? 'sel' : ''}" data-act="day" data-v="${t}" ${future ? 'disabled' : ''} aria-label="${new Date(t).toDateString()}"><i>${new Date(t).getDate()}</i>${d}</button>`;
   }).join('');
   const strengthThisWeek = Object.entries(kinds).filter(([t, k]) => +t >= startOfWeek(today) && k.has('s')).length, goal = S.profile.weeklyGoal || 4;
   const entries = S.workouts.filter(w => startOfDay(w.startedAt) === day).sort((a, b) => a.startedAt - b.startedAt);
-  const label = isToday ? 'Today' : day === today - DAY ? 'Yesterday' : new Date(day).toLocaleDateString(undefined, {weekday: 'long'});
+  const label = isToday ? 'Today' : isTomorrow ? 'Tomorrow' : day === today - DAY ? 'Yesterday' : new Date(day).toLocaleDateString(undefined, {weekday: 'long'});
   const nav = `<div class="daynav">
       <button class="iconbtn" data-act="day-step" data-v="-1" aria-label="Previous day">‹</button>
       <div class="stack" style="gap:0;text-align:center"><b>${label}</b><span class="small muted">${new Date(day).toLocaleDateString(undefined, {month: 'long', day: 'numeric', year: day < today - 300 * DAY ? 'numeric' : undefined})}</span></div>
-      <button class="iconbtn" data-act="day-step" data-v="1" aria-label="Next day" ${isToday ? 'disabled' : ''}>›</button></div>`;
-  const logged = entries.length ? `<section class="section"><p class="eyebrow">${isToday ? 'Logged today' : 'Logged'}</p><div class="hist">${entries.map(entryCard).join('')}</div></section>`
+      <button class="iconbtn" data-act="day-step" data-v="1" aria-label="Next day" ${isTomorrow ? 'disabled' : ''}>›</button></div>`;
+  const logged = isTomorrow ? '' : entries.length ? `<section class="section"><p class="eyebrow">${isToday ? 'Logged today' : 'Logged'}</p><div class="hist">${entries.map(entryCard).join('')}</div></section>`
     : (!isToday ? `<div class="empty">Rest day. Nothing logged on ${new Date(day).toLocaleDateString(undefined, {weekday: 'long'})}.</div>` : '');
-  const logBtn = `<button class="btn block" data-act="log-open">+ Log ${isToday ? 'an activity or custom workout' : 'something for this day'}</button>`;
+  const logBtn = isTomorrow ? '' : `<button class="btn block" data-act="log-open">+ Log ${isToday ? 'an activity or custom workout' : 'something for this day'}</button>`;
   let plan = '';
   if (isToday) {
     const nr = nextRoutine();
-    const list = nr && !nr.exercises.length && nr.timer ? timerOutline(nr.timer) : nr ? nr.exercises.map(ex => {
-      const s = suggest(ex), tgt = `${ex.sets} × ${rangeText(ex)}${ex.timed ? 's' : ''}`;
-      return `<li><span class="nm">${esc(ex.name)}${playBtn(ex.id, ex.name)}</span><span class="tg num">${tgt}</span><span class="ht ${s.tone}">${s.w != null ? `<b>${fmtW(s.w)} ${unit()}</b> · ` : ''}${esc(s.text)}</span></li>`;
-    }).join('') + (nr.timer ? `<li><span class="nm">Finisher: ${esc(specName(nr.timer))}</span><span class="tg num">${fmtDur(specSecs(nr.timer))}</span><span class="ht">${esc(specDetail(nr.timer))}</span></li>` : '') : '';
+    const list = planList(nr);
     // any other day can be opened to see its exercises (and their videos) before starting it
     const others = (S.program ? S.program.routines : []).filter(r => !nr || r.id !== nr.id).map(r => {
       const open = S.peekDay === r.id;
@@ -134,6 +140,16 @@ function viewToday() {
         <button class="btn primary lg block" data-act="start" data-v="${esc(nr.id)}">${S.active ? 'Resume workout' : `Start ${esc(nr.name)}`}</button>
       </section>` : programSetupCard()}
       ${others ? `<section class="section"><p class="eyebrow">Other days</p><div class="card" style="padding-block:4px">${others}</div></section>` : ''}`;
+  }
+  if (isTomorrow) {
+    // the program runs in order, not by weekday, so tomorrow is simply your next session
+    const nr = nextRoutine(), doneToday = !!(S.program && S.workouts.some(w => startOfDay(w.startedAt) === today && S.program.routines.some(r => r.id === w.routineId)));
+    plan = nr ? `<section class="card next">
+        <div class="row between"><div class="stack"><p class="eyebrow">${doneToday ? 'Tomorrow' : 'Your next session'}${nr.focus ? ' · ' + esc(nr.focus) : ''}</p><h2>${esc(nr.name)}</h2></div><span class="tag">${esc(nr.tag || '')}</span></div>
+        ${doneToday ? '' : '<p class="small muted" style="margin:0">You haven’t trained today, so this is still up next, whichever day you go.</p>'}
+        <ul class="plan">${planList(nr)}</ul>
+        <button class="btn block" data-act="day-step" data-v="-1">Back to today</button>
+      </section>` : programSetupCard();
   }
   const weigh = S.body.find(e => e.kind === 'weight' && startOfDay(e.date) === day);
   return `${brand(new Date().toLocaleDateString(undefined, {weekday:'long', month:'long', day:'numeric'}))}

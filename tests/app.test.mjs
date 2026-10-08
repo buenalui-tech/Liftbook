@@ -613,3 +613,21 @@ test('form videos: a play button wherever an exercise is listed, including befor
   T.A['howto-close']();
   assert.equal(T.S.sheet, list);
 });
+
+test('Today: step one day ahead to preview the next session, with its videos', () => {
+  const T = loadApp();
+  T.S.program = T.TEMPLATE_COPY();
+  const today = T.startOfDay(Date.now()), [a, b] = T.S.program.routines;
+  T.S.tab = 'today'; T.S.day = today;
+  T.A['day-step']({v: 1});
+  assert.ok(T.S.day > today, 'tomorrow is reachable');
+  let html = T.viewToday();
+  assert.ok(html.includes('Your next session') && html.includes(a.exercises[0].name) && html.includes('play-btn'));
+  assert.ok(!html.includes('data-act="log-open"'), 'nothing to log on a day that hasn’t happened');
+  T.A['day-step']({v: 1});
+  assert.ok(T.S.day < today + 2 * DAY, 'only one day ahead');
+  // after today's workout, tomorrow shows the following day
+  T.S.workouts = [{id: 'w', routineId: a.id, routineName: a.name, unit: 'lb', startedAt: Date.now() - 3600000, endedAt: Date.now(), exercises: []}];
+  html = T.viewToday();
+  assert.ok(html.includes('>Tomorrow') && html.includes(b.name));
+});
