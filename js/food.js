@@ -62,9 +62,12 @@ async function searchOff(q) {
   return d && Array.isArray(d.products) ? d.products.map(fromOff).filter(Boolean) : null;
 }
 async function lookupBarcode(code) {
-  const own = S.food.find(x => x.kind === 'food' && x.barcode === code); if (own) return customAsFood(own);
-  const d = await fetchJSON(`https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(code)}.json?fields=code,product_name,generic_name,brands,nutriments,serving_size,serving_quantity`);
-  return d && d.status === 1 ? fromOff(d.product) : null;
+  const own = S.food.find(x => x.kind === 'food' && x.barcode && x.barcode.replace(/^0+/, '') === code.replace(/^0+/, '')); if (own) return customAsFood(own);
+  const [usda, d] = await Promise.all([usdaBarcode(code).catch(() => null),
+    fetchJSON(`https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(code)}.json?fields=code,product_name,generic_name,brands,nutriments,serving_size,serving_quantity`)]);
+  const off = d && d.status === 1 ? fromOff(d.product) : null;
+  if (off) off.barcode = code;
+  return usda || off;
 }
 /* Plain foods first. USDA names a food as "Food, descriptor, descriptor" ("Rice, white, long-grain, cooked"),
    so: a dish named after the food ("Rice dressing", "Salmon salad", "Steak tartare") ranks below the food itself;
@@ -227,8 +230,10 @@ function viewFood() {
     ${due ? viewCheckin(due) : ''}
     ${foodDayNav()}
     <section class="card">
-      ${tg ? `<div class="row between" style="align-items:flex-end"><div><b class="num kcal-big">${fmtNum(tot.kcal)}</b> <span class="muted">/ ${fmtNum(tg.kcal)} kcal</span></div>
-          <span class="chip ${left >= 0 ? 'hold' : 'new'} num">${left >= 0 ? `${fmtNum(left)} left` : `${fmtNum(-left)} over`}</span></div>
+      ${tg ? `<div class="cal-line num" role="group" aria-label="Calories: goal minus food equals remaining">
+            <div><b>${fmtNum(tg.kcal)}</b><span>Goal</span></div><i aria-hidden="true">−</i>
+            <div><b>${fmtNum(tot.kcal)}</b><span>Food</span></div><i aria-hidden="true">=</i>
+            <div class="rem ${left < 0 ? 'over' : ''}"><b>${fmtNum(Math.abs(left))}</b><span>${left < 0 ? 'Over' : 'Remaining'}</span></div></div>
           <div class="mac-tr big"><div class="mac-v kc ${left < 0 ? 'over' : ''}" style="width:${Math.min(100, tot.kcal / tg.kcal * 100)}%"></div></div>`
         : `<div><b class="num kcal-big">${fmtNum(tot.kcal)}</b> <span class="muted">kcal</span></div>
            <p class="small muted" style="margin:0">Log a weigh-in on the Body tab and Liftbook sets calorie and protein targets for you, or tap Set targets to enter your own.</p>`}
@@ -268,6 +273,7 @@ function foodHistory() {
     by.set(k, e);
   }
   for (const c of S.food) if (c.kind === 'food') { const f = customAsFood(c); if (!by.has(f.key)) by.set(f.key, {food: f, n: 0, meals: {}, last: null}); }
+  for (const r of S.food) if (r.kind === 'recipe') { const f = recipeAsFood(r), e = by.get(f.key); if (e) e.food = f; else by.set(f.key, {food: f, n: 0, meals: {}, last: null}); }
   return [...by.values()].map(e => ({...e, age: e.last ? (now - e.last.date) / DAY : 999}));
 }
 // every word you type is the start of some word in the name: "chi bre" finds "Chicken breast"
@@ -284,7 +290,11 @@ function localMatches(q, meal) {
 }
 function searchResultsHTML(sh) {
   const q = (sh.q || '').trim(), local = localMatches(q, sh.meal), seen = new Set(local.map(e => e.food.key));
-  const meals = q ? S.food.filter(x => x.kind === 'meal' && matchesQuery(x.name, q)) : [];
+  const meals = q && !sh.into ? S.food.filter(x => x.kind === 'meal' && matchesQuery(x.name, q)) : [];
+  // your own foods: tap to choose an amount, or + to add last time's amount right away
+  const own = (e, i, note) => sh.into || !e.last ? foodResult(e.food, i, note)
+    : `<div class="lib-row">${foodResult(e.food, i, note)}<button class="quick-plus" data-act="food-relog" data-v="${i}" aria-label="Add ${esc(e.food.name)}, ${esc(e.last.qtyLabel || 'same amount')}">+</button></div>`;
+  sh.local = local;
   const remote = q.length >= 2 && sh.remoteQ === q ? (sh.remote || []).filter(f => !seen.has(f.key)) : [];
   sh.results = [...local.map(e => e.food), ...remote];
   const portion = e => e.last && e.last.qtyLabel ? `last time ${e.last.qtyLabel}` : '';
@@ -292,11 +302,11 @@ function searchResultsHTML(sh) {
   if (!q) {
     const searches = (S.profile.recentSearches || []).slice(0, 6);
     out += searches.length ? `<div class="chips recent-q">${searches.map(s => `<button class="chipbtn" data-act="food-q-pick" data-v="${esc(s)}">${esc(s)}</button>`).join('')}</div>` : '';
-    out += local.length ? `<p class="eyebrow" style="margin:0">Your usual ${esc(mealLabel(sh.meal).toLowerCase())}</p><div class="lib">${local.map((e, i) => foodResult(e.food, i, portion(e))).join('')}</div>`
+    out += local.length ? `<p class="eyebrow" style="margin:0">${sh.into ? 'Your foods' : `Your usual ${esc(mealLabel(sh.meal).toLowerCase())}`}</p><div class="lib">${local.map((e, i) => own(e, i, portion(e))).join('')}</div>`
       : '<p class="small muted">Search for a food, or scan a barcode. Foods you log show up here first next time, ready to add again in one tap.</p>';
     return out;
   }
-  if (local.length || meals.length) out += `<p class="eyebrow" style="margin:0">Yours</p><div class="lib">${meals.map(m => `<button data-act="saved-meal-log" data-v="${esc(m.id)}"><span class="stack" style="gap:1px;min-width:0;text-align:left"><span class="fname">${esc(m.name)}</span><span class="small muted">${m.items.length} items · ${fmtNum(mealKcal(m))} kcal</span></span><span class="src custom">Meal</span></button>`).join('')}${local.map((e, i) => foodResult(e.food, i, portion(e))).join('')}</div>`;
+  if (local.length || meals.length) out += `<p class="eyebrow" style="margin:0">Yours</p><div class="lib">${meals.map(m => `<button data-act="saved-meal-log" data-v="${esc(m.id)}"><span class="stack" style="gap:1px;min-width:0;text-align:left"><span class="fname">${esc(m.name)}</span><span class="small muted">${m.items.length} items · ${fmtNum(mealKcal(m))} kcal</span></span><span class="src custom">Meal</span></button>`).join('')}${local.map((e, i) => own(e, i, portion(e))).join('')}</div>`;
   if (q.length < 2) return out;
   if (remote.length) out += `<p class="eyebrow" style="margin:0">Food database</p><div class="lib">${remote.map((f, i) => foodResult(f, local.length + i)).join('')}</div>`;
   if (sh.loading) out += '<p class="small muted" style="margin:0">Searching the food database…</p>';
@@ -311,24 +321,28 @@ function paintSearch() {
 }
 function viewAddFood() {
   const sh = S.sheet, mode = sh.mode === 'recent' ? 'search' : sh.mode || 'search';
-  const tabs = [['search', 'Search'], ['mine', 'My foods'], ['quick', 'Quick add']];
+  const tabs = [['search', 'Search'], ['mine', 'Mine'], ['quick', 'Quick add']];
   let body = '';
   if (mode === 'search') {
-    body = `<div class="row" style="gap:8px"><input id="food-q" data-in="food-q" type="search" class="grow search" value="${esc(sh.q || '')}" placeholder="Search foods, e.g. greek yogurt"
+    body = `<div class="row" style="gap:8px"><span class="search-wrap grow"><input id="food-q" data-in="food-q" type="search" class="search" value="${esc(sh.q || '')}" placeholder="${SpeechRec ? 'Search or tap the mic' : 'Search foods, e.g. greek yogurt'}"
         autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" enterkeyhint="search">
+        ${SpeechRec ? `<button id="food-mic" class="mic ${sh.listening ? 'on' : ''}" data-act="food-mic" aria-label="Say a food, like 150 grams of chicken breast" aria-pressed="${!!sh.listening}">${ICON_MIC}</button>` : ''}</span>
         <button class="btn" data-act="barcode-open" aria-label="Scan a barcode">${BARCODE_ICON} Scan</button></div>
       <div class="stack" id="food-results" style="gap:10px">${searchResultsHTML(sh)}</div>`;
   } else if (mode === 'mine') {
-    const mine = S.food.filter(x => x.kind === 'food').sort((a, b) => a.name.localeCompare(b.name));
-    const meals = S.food.filter(x => x.kind === 'meal').sort((a, b) => a.name.localeCompare(b.name));
-    sh.results = mine.map(customAsFood);
-    body = `${meals.length ? `<p class="eyebrow" style="margin:0">Saved meals</p><div class="lib">${meals.map(m => `<div class="saved-meal">
-        <button data-act="saved-meal-log" data-v="${esc(m.id)}"><span class="stack" style="gap:1px;text-align:left"><span class="fname">${esc(m.name)}</span>
-          <span class="small muted">${m.items.length} items · ${fmtNum(mealKcal(m))} kcal</span></span><span class="src custom">Meal</span></button>
-        <button class="iconbtn" data-act="saved-meal-del" data-v="${esc(m.id)}" aria-label="Delete ${esc(m.name)}" style="${S.armed === 'smdel' + m.id ? 'color:var(--pr)' : ''}">${S.armed === 'smdel' + m.id ? '✓?' : '✕'}</button></div>`).join('')}</div>
-        <p class="eyebrow" style="margin:0">Foods</p>` : ''}
-      ${mine.length ? `<div class="lib">${sh.results.map((x, i) => foodResult(x, i)).join('')}</div>` : '<p class="small muted">Save foods and recipes the databases don’t have.</p>'}
-      <button class="btn block" data-act="custom-new">+ Create a food</button>`;
+    // My meals, My recipes, My foods: tap to log, Edit to change; everything is edited in place
+    const byName = (x, y) => x.name.localeCompare(y.name);
+    const mine = S.food.filter(x => x.kind === 'food').sort(byName), meals = S.food.filter(x => x.kind === 'meal').sort(byName), recipes = S.food.filter(x => x.kind === 'recipe').sort(byName);
+    sh.results = [...recipes.map(recipeAsFood), ...mine.map(customAsFood)];
+    const row = (act, v, name, sub, badge, editAct, editV = v) => `<div class="lib-row"><button data-act="${act}" data-v="${esc(v)}"><span class="stack" style="gap:1px;min-width:0;text-align:left"><span class="fname">${esc(name)}</span><span class="small muted">${esc(sub)}</span></span><span class="src ${badge.toLowerCase()}">${badge}</span></button>
+      <button class="edit-link" data-act="${editAct}" data-v="${esc(editV)}" aria-label="Edit ${esc(name)}">Edit</button></div>`;
+    const section = (title, list, add) => `<div class="row between"><p class="eyebrow" style="margin:0">${title}</p>${add}</div>${list || ''}`;
+    body = `${sh.into ? '' : section('My meals', meals.length ? `<div class="lib">${meals.map(m => row('saved-meal-log', m.id, m.name, `${m.items.length} foods · ${fmtNum(mealKcal(m))} kcal`, 'Meal', 'meal-edit')).join('')}</div>` : '<p class="small muted" style="margin:0">Foods you often have together, added in one tap.</p>', '<button class="btn ghost small-btn" data-act="meal-new">+ New</button>')}
+      ${section('My recipes', recipes.length ? `<div class="lib">${recipes.map((r, i) => { const f = sh.results[i], k = f.per100 ? f.per100.kcal * (f.servings[0].grams || 100) / 100 : f.perServing.kcal;
+        return row('food-pick', i, r.name, `${fmtW(r.servings)} servings · ${fmtNum(k)} kcal each`, 'Recipe', 'recipe-edit', r.id); }).join('')}</div>`
+        : '<p class="small muted" style="margin:0">Cook once, log a serving or weigh your bowl. Easy to change when the recipe does.</p>', '<button class="btn ghost small-btn" data-act="recipe-new">+ New</button>')}
+      ${section('My foods', mine.length ? `<div class="lib">${mine.map((c, i) => row('food-pick', recipes.length + i, c.name, [c.brand, `${fmtNum(c.perServing.kcal)} kcal per ${c.servingLabel || 'serving'}`].filter(Boolean).join(' · '), 'Mine', 'custom-edit', c.id)).join('')}</div>`
+        : '<p class="small muted" style="margin:0">Foods the databases don’t have, or your own corrections to a label.</p>', '<button class="btn ghost small-btn" data-act="custom-new">+ New</button>')}`;
   } else if (mode === 'quick') {
     body = `<p class="small muted" style="margin:0">For restaurant meals or anything you only know the numbers for.</p>
       <label class="field">Name (optional)<input id="qa-name" placeholder="Chipotle bowl"></label>
@@ -336,7 +350,7 @@ function viewAddFood() {
         <label class="field">Carbs (g)<input id="qa-c" inputmode="decimal"></label><label class="field">Fat (g)<input id="qa-f" inputmode="decimal"></label></div>
       <button class="btn primary block" data-act="quick-save">Add to ${esc(mealLabel(sh.meal))}</button>`;
   }
-  return `<div class="row between"><h2>Add to ${esc(mealLabel(sh.meal))}</h2><button class="iconbtn" data-act="sheet-close" aria-label="Close">✕</button></div>
+  return `<div class="row between"><h2>${sh.into ? `Add to ${esc(sh.into.draft.name || (sh.into.kind === 'recipe' ? 'recipe' : 'meal'))}` : `Add to ${esc(mealLabel(sh.meal))}`}</h2><button class="iconbtn" data-act="${sh.into ? 'into-back' : 'sheet-close'}" aria-label="${sh.into ? 'Back' : 'Close'}">✕</button></div>
     ${sh.plate ? `<div class="banner small">${ICON_SCALE} Scale zeroed. Put the next food on the plate and pick it below, or close when you’re done.</div>` : ''}
     <div class="seg tabs3" role="tablist">${tabs.map(([k, l]) => `<button data-act="food-mode" data-v="${k}" aria-pressed="${mode === k}">${l}</button>`).join('')}</div>
     ${body}`;
@@ -347,7 +361,7 @@ function foodResult(x, i, note) {
   const per = x.per100 ? `${fmtNum(x.per100.kcal)} kcal · ${r1(x.per100.p)}g P per 100 g` : x.perServing ? `${fmtNum(x.perServing.kcal)} kcal per serving` : '';
   return `<button data-act="food-pick" data-v="${i}"><span class="stack" style="gap:1px;min-width:0;text-align:left"><span class="fname">${esc(x.name)}</span>
     <span class="small muted">${esc([x.brand, note || per].filter(Boolean).join(' · '))}</span></span>
-    <span class="src ${x.source}">${x.source === 'usda' ? 'USDA' : x.source === 'off' ? 'Label' : 'Mine'}</span></button>`;
+    <span class="src ${x.source}">${x.source === 'usda' ? (x.dataType === 'Branded' ? 'Label' : 'USDA') : x.source === 'off' ? 'Label' : x.source === 'recipe' ? 'Recipe' : 'Mine'}</span></button>`;
 }
 // typing: your own foods repaint at once; the databases are asked after a short pause, and remembered
 function onFoodQuery(q) {
@@ -383,19 +397,22 @@ function openPortion(food, meal, existing) {
   S.sheet = {type: 'portion', food, meal: existing ? existing.meal : meal, qty: last ? last.qty : (units[0].id === 'g' ? 100 : 1), unit: unitId, editId: existing ? existing.id : null, back: S.sheet};
   // weighing a plate: the next food goes straight onto the scale
   if (S.sheet.back && S.sheet.back.plate && Scale.status === 'on' && food.per100) Object.assign(S.sheet, {weigh: true, unit: 'g', qty: Math.max(0, Math.round(Scale.grams() || 0))});
+  else if (!existing && S.sheet.back && S.sheet.back.spoken) applySpoken(S.sheet, S.sheet.back.spoken);
   render();
 }
 function viewPortion() {
   const sh = S.sheet, f = sh.food, units = unitsFor(f), {grams, totals} = portionTotals(f, +sh.qty || 0, sh.unit);
-  return `<div class="row between"><h2>${sh.editId ? 'Edit food' : 'Add food'}</h2><button class="iconbtn" data-act="${sh.editId ? 'sheet-close' : 'portion-back'}" aria-label="Back">✕</button></div>
-    <div class="stack" style="gap:2px"><b>${esc(f.name)}</b><span class="small muted">${esc([f.brand, f.source === 'usda' ? 'USDA FoodData Central' : f.source === 'off' ? 'Open Food Facts' : f.source === 'quick' ? 'Quick add' : 'My food'].filter(Boolean).join(' · '))}</span></div>
+  const into = sh.back && sh.back.into, labelled = f.dataType === 'Branded' || f.source === 'off';
+  return `<div class="row between"><h2>${sh.editId ? 'Edit food' : into ? `Add to ${esc(into.draft.name || into.kind)}` : 'Add food'}</h2><button class="iconbtn" data-act="${sh.editId ? 'sheet-close' : 'portion-back'}" aria-label="Back">✕</button></div>
+    <div class="stack" style="gap:2px"><b>${esc(f.name)}</b><span class="small muted">${esc([f.brand, f.dataType === 'Branded' ? 'Package label (USDA)' : f.source === 'usda' ? 'USDA FoodData Central' : f.source === 'off' ? 'Package label (Open Food Facts)' : f.source === 'quick' ? 'Quick add' : f.source === 'recipe' ? 'My recipe' : 'My food'].filter(Boolean).join(' · '))}</span>
+      ${labelled ? '<button class="linkbtn small" data-act="food-fix" style="align-self:flex-start">Numbers don’t match the package? Fix them</button>' : ''}</div>
     ${f.source === 'quick' ? '' : sh.weigh && Scale.status === 'on' ? weighBlock(sh) : `<div class="row"><label class="field" style="width:110px">Amount<input id="po-qty" data-in="po-qty" inputmode="decimal" value="${esc(sh.qty)}"></label>
       <label class="field grow">Unit<select id="po-unit" data-in="po-unit">${units.map(u => `<option value="${u.id}" ${u.id === sh.unit ? 'selected' : ''}>${esc(u.label)}${u.grams && u.id !== 'g' && u.id !== 'oz' && !/\d\s*(g|ml)\b/i.test(u.label) ? ` (${r1(u.grams)} g)` : ''}</option>`).join('')}</select></label></div>
       ${weighBlock(sh)}`}
     <div class="stats" id="po-totals">${portionStats(totals, grams)}</div>
     <p class="small" id="po-micros" style="margin:0">${portionMicros(f, grams, +sh.qty || 0)}</p>
-    <div class="chips" role="group" aria-label="Meal">${MEALS.map(([m, l]) => `<button class="chipbtn" data-act="po-meal" data-v="${m}" aria-pressed="${sh.meal === m}">${l}</button>`).join('')}</div>
-    <button class="btn primary lg block" data-act="portion-save">${sh.editId ? 'Save changes' : `Add to ${esc(mealLabel(sh.meal))}`}</button>
+    ${into ? '' : `<div class="chips" role="group" aria-label="Meal">${MEALS.map(([m, l]) => `<button class="chipbtn" data-act="po-meal" data-v="${m}" aria-pressed="${sh.meal === m}">${l}</button>`).join('')}</div>`}
+    <button class="btn primary lg block" data-act="portion-save">${sh.editId ? 'Save changes' : into ? `Add to ${into.kind}` : `Add to ${esc(mealLabel(sh.meal))}`}</button>
     ${sh.weigh && Scale.status === 'on' && !sh.editId ? '<button class="btn block" data-act="portion-save-next">Add, then weigh the next food</button>' : ''}
     ${sh.editId ? `<button class="btn danger block ${S.armed === 'fdel' ? 'armed' : ''}" data-act="food-del">${S.armed === 'fdel' ? 'Tap again to remove' : 'Remove from log'}</button>` : ''}`;
 }
@@ -403,49 +420,58 @@ const portionStats = (t, grams) => `<div class="stat"><b class="num">${fmtNum(t.
   <div class="stat"><b class="num">${r1(t.p)}</b><span>Protein g</span></div><div class="stat"><b class="num">${r1(t.c)} / ${r1(t.f)}</b><span>Carbs / fat g</span></div>`;
 function savePortion() {
   const sh = S.sheet, qty = parseFloat(String(sh.qty).replace(',', '.'));
-  if (sh.food.source !== 'quick' && !(qty > 0)) { toast('Enter an amount, like 1 or 150.'); return; }
+  if (sh.food.source !== 'quick' && !(qty > 0)) { toast('Enter an amount, like 1 or 150.'); return false; }
   const u = unitsFor(sh.food).find(x => x.id === sh.unit) || unitsFor(sh.food)[0];
   const {grams, totals} = portionTotals(sh.food, sh.food.source === 'quick' ? 1 : qty, sh.unit);
   const qtyLabel = sh.food.source === 'quick' ? '' : u.id === 'g' ? `${fmtW(qty)} g` : u.id === 'oz' ? `${fmtW(qty)} oz`
     : /^1 /.test(u.label) ? `${fmtW(qty)} ${u.label.slice(2)}` : `${fmtW(qty)} × ${u.label}`;
+  // building a recipe or a meal: the portion becomes one of its items
+  const into = sh.back && sh.back.into;
+  if (into && !sh.editId) { into.draft.items.push({food: sh.food, qty: sh.food.source === 'quick' ? 1 : qty, unit: u.id, qtyLabel, grams, totals}); into.msg = ''; S.sheet = into; render(); toast(`${sh.food.name} added`); return true; }
   const existing = sh.editId ? S.food.find(x => x.id === sh.editId) : null;
   const day = S.day || startOfDay(Date.now());
   const e = existing || {id: newId(), kind: 'log', date: day === startOfDay(Date.now()) ? Date.now() : day + 12 * 3600000};
   Object.assign(e, {meal: sh.meal, food: sh.food, qty: sh.food.source === 'quick' ? 1 : qty, unit: u.id, qtyLabel, grams, totals});
   if (!existing) S.food.push(e);
   store.saveFood(e); S.sheet = null; render(); toast(existing ? 'Updated' : `Added to ${mealLabel(e.meal)}`);
+  return true;
 }
 function saveQuickAdd() {
   const num = id => { const v = parseFloat((document.getElementById(id).value || '').replace(',', '.')); return v > 0 ? v : 0; };
   const kcal = num('qa-kcal'); if (!kcal) { toast('Enter the calories.'); return; }
   const name = (document.getElementById('qa-name').value || '').trim() || 'Quick add';
   const food = {key: 'quick:' + newId(), source: 'quick', sourceId: '', name, brand: '', per100: null, perServing: {kcal, p: num('qa-p'), c: num('qa-c'), f: num('qa-f'), fiber: 0}, servings: []};
-  S.sheet = {type: 'portion', food, meal: S.sheet.meal, qty: 1, unit: 'serving'}; savePortion();
+  S.sheet = {type: 'portion', food, meal: S.sheet.meal, qty: 1, unit: 'serving', back: S.sheet}; savePortion();
 }
 
 /* ---------- custom foods ---------- */
 function viewCustomFood() {
-  const sh = S.sheet;
-  return `<div class="row between"><h2>Create a food</h2><button class="iconbtn" data-act="sheet-close" aria-label="Close">✕</button></div>
-    <p class="small muted" style="margin:0">Copy the numbers from the nutrition label, for one serving.</p>
-    <label class="field">Name<input id="cf-name" value="${esc(sh.name || '')}" placeholder="Protein overnight oats"></label>
-    <div class="row"><label class="field grow">Brand (optional)<input id="cf-brand"></label><label class="field grow">Barcode (optional)<input id="cf-code" inputmode="numeric" value="${esc(sh.barcode || '')}"></label></div>
-    <div class="row"><label class="field grow">Serving<input id="cf-serv" value="1 serving" placeholder="1 bar"></label><label class="field" style="width:120px">Serving weight g (optional)<input id="cf-g" inputmode="decimal"></label></div>
-    <div class="scan-grid"><label class="field">Calories<input id="cf-kcal" inputmode="numeric"></label><label class="field">Protein (g)<input id="cf-p" inputmode="decimal"></label>
-      <label class="field">Carbs (g)<input id="cf-c" inputmode="decimal"></label><label class="field">Fat (g)<input id="cf-f" inputmode="decimal"></label></div>
-    <button class="btn primary block" data-act="custom-save">Save food</button>`;
+  const sh = S.sheet, p = sh.pre || {}, ps = p.perServing || {}, v = n => n > 0 ? esc(fmtW(Math.round(n * 10) / 10)) : '';
+  const title = sh.editId ? 'Edit food' : sh.pre ? 'Fix the label' : 'Create a food';
+  return `<div class="row between"><h2>${title}</h2><button class="iconbtn" data-act="sheet-close" aria-label="Close">✕</button></div>
+    <p class="small muted" style="margin:0">${sh.pre && !sh.editId ? 'Change anything that doesn’t match the package. It’s saved as your own, and scanning this barcode uses your numbers from now on.' : 'Copy the numbers from the nutrition label, for one serving.'}</p>
+    <label class="field">Name<input id="cf-name" value="${esc(p.name || sh.name || '')}" placeholder="Protein overnight oats"></label>
+    <div class="row"><label class="field grow">Brand (optional)<input id="cf-brand" value="${esc(p.brand || '')}"></label><label class="field grow">Barcode (optional)<input id="cf-code" inputmode="numeric" value="${esc(p.barcode || sh.barcode || '')}"></label></div>
+    <div class="row"><label class="field grow">Serving<input id="cf-serv" value="${esc(p.servingLabel || '1 serving')}" placeholder="1 bar"></label><label class="field" style="width:120px">Serving weight g (optional)<input id="cf-g" inputmode="decimal" value="${v(p.servingGrams)}"></label></div>
+    <div class="scan-grid"><label class="field">Calories<input id="cf-kcal" inputmode="numeric" value="${v(ps.kcal)}"></label><label class="field">Protein (g)<input id="cf-p" inputmode="decimal" value="${v(ps.p)}"></label>
+      <label class="field">Carbs (g)<input id="cf-c" inputmode="decimal" value="${v(ps.c)}"></label><label class="field">Fat (g)<input id="cf-f" inputmode="decimal" value="${v(ps.f)}"></label></div>
+    <button class="btn primary block" data-act="custom-save">${sh.editId ? 'Save changes' : 'Save food'}</button>
+    ${sh.editId ? `<button class="btn danger block ${S.armed === 'cfdel' ? 'armed' : ''}" data-act="custom-del">${S.armed === 'cfdel' ? 'Tap again to delete' : 'Delete food'}</button>` : ''}`;
 }
 function saveCustomFood() {
   const val = id => (document.getElementById(id).value || '').trim(), num = id => { const v = parseFloat(val(id).replace(',', '.')); return v > 0 ? v : 0; };
   const name = val('cf-name'); if (!name) { toast('Give the food a name.'); return; }
   if (!num('cf-kcal')) { toast('Enter the calories per serving.'); return; }
-  const meal = S.sheet.meal;
-  const c = {id: newId(), kind: 'food', date: Date.now(), name, brand: val('cf-brand'), barcode: val('cf-code').replace(/\D/g, ''),
+  const sh = S.sheet, meal = sh.meal, old = sh.editId ? S.food.find(x => x.id === sh.editId) : null;
+  const c = {...(old || {id: newId(), kind: 'food', date: Date.now()}), name, brand: val('cf-brand'), barcode: val('cf-code').replace(/\D/g, ''),
     servingLabel: val('cf-serv') || '1 serving', servingGrams: num('cf-g') || null,
-    perServing: {kcal: num('cf-kcal'), p: num('cf-p'), c: num('cf-c'), f: num('cf-f'), fiber: 0}};
-  S.food.push(c); store.saveFood(c); toast(`${name} saved`);
+    perServing: {kcal: num('cf-kcal'), p: num('cf-p'), c: num('cf-c'), f: num('cf-f'), fiber: (old && old.perServing.fiber) || (sh.pre && sh.pre.perServing.fiber) || 0}};
+  delete c.updatedAt;
+  if (!old) S.food.push(c);
+  store.saveFood(c); toast(`${name} saved`);
+  if (old) { S.sheet = sh.back || null; render(); return; }
   const food = customAsFood(c);
-  S.sheet = {type: 'add-food', meal, mode: 'mine'};
+  S.sheet = {type: 'add-food', meal, mode: 'mine', into: sh.into};
   openPortion(food, meal);
 }
 
@@ -488,7 +514,7 @@ async function onBarcode(code) {
   const food = await lookupBarcode(code);
   if (S.sheet !== sh) return;
   sh.looking = false;
-  if (food) { S.sheet = {type: 'add-food', meal: sh.meal, mode: 'search'}; openPortion(food, sh.meal); }
+  if (food) { S.sheet = {type: 'add-food', meal: sh.meal, mode: 'search', into: sh.into}; openPortion(food, sh.meal); }
   else { sh.notFound = code; render(); }
 }
 

@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 
-const FILES = ['core', 'training', 'ui', 'howto', 'program', 'body', 'food', 'scale', 'adaptive', 'figure', 'share', 'tester', 'settings', 'timer', 'events'];
+const FILES = ['core', 'training', 'ui', 'howto', 'program', 'body', 'food', 'scale', 'recipes', 'adaptive', 'figure', 'share', 'tester', 'settings', 'timer', 'events'];
 const DAY = 86400000;
 
 function loadApp(stored = {}, extra = {}) {
@@ -28,7 +28,7 @@ function loadApp(stored = {}, extra = {}) {
   vm.createContext(ctx);
   // top-level const/let live in the context's script scope; expose the names tests need
   const src = FILES.map(f => fs.readFileSync(new URL(`../js/${f}.js`, import.meta.url), 'utf8')).join('\n;\n') +
-    '\n;globalThis.T = {S, store, suggest, e1rm, niceTicks, weightSeries, weeklyRateKg, caloriesFor, improvements, recomputePRs, muscleLoad, musclesFor, tagFor, lastPerf, scanKg, conv, TEMPLATE, CATALOG, slug, startOfDay, fromUsda, fromOff, rankFoods, unitsFor, portionTotals, autoTargets, dayTotals, estimateBurn, targets, targetsFromBurn, computeTargets, nutritionPrefs, proposeTargets, applyCheckin, runAutoCheckin, checkinDue, copyMeal, foodLogs, viewToday, viewFood, viewProgress, viewBody, viewProgram, viewSheet, viewWorkout, startWorkout, viewSettings, buildPhases, Timer, viewTimer, viewTimerSetup, viewMobilitySetup, MOBILITY, viewTrainingLoad, sessionLoad, specFromVals, specToSheet, cleanSpec, specSecs, finishWorkout, timerOutline, viewTimerSetup, microFromUsda, microFromOff, entryMicro, viewMicros, Micro, fromUsda, portionMicros, Scale, esnParse, esnPacket, openPortion, viewPortion, A, viewSettings, matchesQuery, localMatches, searchResultsHTML, onFoodQuery, rememberSearch, searchCache, viewAddFood, ytId, formVideo, FORM_VIDEOS, viewHowto, holdForVideo, playBtn, TEMPLATE_COPY: () => JSON.parse(JSON.stringify(TEMPLATE))};';
+    '\n;globalThis.T = {S, store, suggest, e1rm, niceTicks, weightSeries, weeklyRateKg, caloriesFor, improvements, recomputePRs, muscleLoad, musclesFor, tagFor, lastPerf, scanKg, conv, TEMPLATE, CATALOG, slug, startOfDay, fromUsda, fromOff, rankFoods, unitsFor, portionTotals, autoTargets, dayTotals, estimateBurn, targets, targetsFromBurn, computeTargets, nutritionPrefs, proposeTargets, applyCheckin, runAutoCheckin, checkinDue, copyMeal, foodLogs, viewToday, viewFood, viewProgress, viewBody, viewProgram, viewSheet, viewWorkout, startWorkout, viewSettings, buildPhases, Timer, viewTimer, viewTimerSetup, viewMobilitySetup, MOBILITY, viewTrainingLoad, sessionLoad, specFromVals, specToSheet, cleanSpec, specSecs, finishWorkout, timerOutline, viewTimerSetup, microFromUsda, microFromOff, entryMicro, viewMicros, Micro, fromUsda, portionMicros, Scale, esnParse, esnPacket, openPortion, viewPortion, A, viewSettings, matchesQuery, localMatches, searchResultsHTML, onFoodQuery, rememberSearch, searchCache, viewAddFood, ytId, formVideo, FORM_VIDEOS, viewHowto, holdForVideo, playBtn, openCollection, saveCollection, recipeAsFood, setItemAmount, parseSpoken, applySpoken, lookupBarcode, relogLast, savePortion, viewCollection, TEMPLATE_COPY: () => JSON.parse(JSON.stringify(TEMPLATE))};';
   vm.runInContext(src, ctx, {filename: 'liftbook.js'});
   return ctx.T;
 }
@@ -630,4 +630,96 @@ test('Today: step one day ahead to preview the next session, with its videos', (
   T.S.workouts = [{id: 'w', routineId: a.id, routineName: a.name, unit: 'lb', startedAt: Date.now() - 3600000, endedAt: Date.now(), exercises: []}];
   html = T.viewToday();
   assert.ok(html.includes('>Tomorrow') && html.includes(b.name));
+});
+
+test('recipes: build from foods, change amounts in place, scale the batch, log by serving or by weight, and edits follow today’s log', () => {
+  const T = loadApp();
+  const beef = {key: 'usda:b', source: 'usda', sourceId: 'b', name: 'Beef, ground, 93% lean', per100: {kcal: 150, p: 21, c: 0, f: 7, fiber: 0}, micro: {fe: 2.4, zn: 5}, servings: []};
+  const beans = {key: 'usda:k', source: 'usda', sourceId: 'k', name: 'Kidney beans, canned', per100: {kcal: 80, p: 5, c: 14, f: 0.5, fiber: 6}, micro: {fe: 1.2}, servings: [{label: '1 cup', grams: 256}]};
+  T.S.sheet = {type: 'add-food', meal: 'dinner', mode: 'mine'};
+  T.A['recipe-new']();
+  const ed = T.S.sheet; ed.draft.name = 'Turkey chili';
+  // add ingredients through the normal search → portion flow
+  T.A['coll-add'](); T.openPortion(beef, 'dinner'); T.S.sheet.qty = 500; T.S.sheet.unit = 'g'; T.savePortion();
+  T.A['coll-add'](); T.openPortion(beans, 'dinner'); T.S.sheet.qty = 2; T.S.sheet.unit = 's0'; T.savePortion();
+  assert.equal(T.S.sheet, ed, 'back in the recipe after each ingredient');
+  assert.equal(ed.draft.items.length, 2);
+  assert.ok(T.viewCollection().includes('Turkey chili') && T.viewCollection().includes('ci-q-1'));
+  // change an amount right in the list
+  T.setItemAmount(0, 600, null);
+  assert.equal(ed.draft.items[0].totals.kcal, 900);
+  const batch = 900 + 80 * 5.12;
+  // a double batch: everything doubles, a serving stays the same
+  const perServing = batch / 4;
+  T.A['coll-scale']({v: 2});
+  assert.equal(ed.draft.items[0].qty, 1200); assert.equal(ed.draft.servings, 8);
+  assert.ok(Math.abs(T.recipeAsFood(ed.draft).perServing.kcal - perServing) < 0.1);
+  // weigh the cooked batch: now a serving can be logged by grams
+  ed.draft.cookedGrams = 2400;
+  const f = T.recipeAsFood(ed.draft);
+  assert.ok(Math.abs(f.per100.kcal - batch * 2 / 24) < 0.1); assert.equal(f.servings[0].grams, 300);
+  assert.ok(f.micro.fe > 0, 'vitamins and minerals carry through');
+  T.A['coll-save']({v: 'only'});
+  const rec = T.S.food.find(x => x.kind === 'recipe');
+  assert.equal(rec.name, 'Turkey chili');
+  // log 350 g of it, then change the recipe: today's entry follows
+  T.S.sheet = {type: 'add-food', meal: 'dinner', mode: 'mine'};
+  T.openPortion(T.recipeAsFood(rec), 'dinner'); T.S.sheet.qty = 350; T.S.sheet.unit = 'g'; T.savePortion();
+  const entry = T.S.food.find(x => x.kind === 'log');
+  const before = entry.totals.kcal;
+  T.S.sheet = {type: 'add-food', meal: 'dinner', mode: 'mine'};
+  T.A['recipe-edit']({v: rec.id});
+  assert.equal(T.S.sheet.updates, 1);
+  T.setItemAmount(0, 600, null);   // half the beef this time
+  T.A['coll-save']({v: 'only'});
+  assert.ok(entry.totals.kcal < before, 'the logged bowl reflects the lighter recipe');
+  assert.equal(entry.grams, 350);
+});
+
+test('saved meals are editable, voice phrases become a search and an amount, barcodes prefer the official label', async () => {
+  const fetched = [];
+  const fetch = async url => { fetched.push(url);
+    if (url.includes('api.nal.usda.gov')) return {ok: true, status: 200, json: async () => ({foods: [{fdcId: 9, description: 'PRINGLES ORIGINAL', brandOwner: 'Kellogg', gtinUpc: '00038000138416', servingSize: 28, servingSizeUnit: 'g', householdServingFullText: 'about 15 crisps', foodNutrients: [{nutrientId: 1008, value: 536}, {nutrientId: 1003, value: 3.6}]}]})};
+    return {ok: true, status: 200, json: async () => ({status: 1, product: {code: '038000138416', product_name: 'Original crisps', nutriments: {'energy-kcal_100g': 500}}})}; };
+  const T = loadApp({}, {fetch});
+  // a meal: change an amount, the next log uses it
+  const oats = {key: 'usda:o', source: 'usda', sourceId: 'o', name: 'Oats', per100: {kcal: 380, p: 13, c: 67, f: 7, fiber: 10}, servings: []};
+  T.S.food = [{id: 'm', kind: 'meal', date: 1, name: 'Breakfast', items: [{food: oats, qty: 80, unit: 'g', qtyLabel: '80 g', grams: 80, totals: {kcal: 304, p: 10.4, c: 53.6, f: 5.6, fiber: 8}}]}];
+  T.S.sheet = {type: 'add-food', meal: 'breakfast', mode: 'mine'};
+  T.A['meal-edit']({v: 'm'});
+  T.setItemAmount(0, 60, null);
+  T.A['coll-save']({});
+  assert.equal(T.S.food.filter(x => x.kind === 'log')[0].grams, 60, 'saved and added to breakfast');
+  // voice
+  const p1 = T.parseSpoken('150 grams of chicken breast'), p2 = T.parseSpoken('two eggs'), p3 = T.parseSpoken('one and a half cups of rice');
+  assert.equal(`${p1.qty} ${p1.unit} ${p1.q}`, '150 g chicken breast');
+  assert.equal(`${p2.qty} ${p2.unit} ${p2.q}`, '2 null eggs');
+  assert.equal(`${p3.qty} ${p3.unit} ${p3.q}`, '1.5 cup rice');
+  const sh = {food: {name: 'Rice, cooked', per100: {kcal: 1}, servings: [{label: '1 cup', grams: 158}]}, qty: 100, unit: 'g'};
+  T.applySpoken(sh, {qty: 1.5, unit: 'cup'}); assert.equal(`${sh.qty} ${sh.unit}`, '1.5 s0');
+  // barcode: USDA's label data first, matched on the 14-digit GTIN
+  const f = await T.lookupBarcode('038000138416');
+  assert.equal(f.dataType, 'Branded'); assert.equal(f.name, 'Pringles Original'); assert.equal(f.servings[0].grams, 28);
+  assert.ok(fetched.some(u => u.includes('00038000138416')));
+  // and your own correction beats both, leading zeros or not
+  T.S.food.push({id: 'c', kind: 'food', date: 1, name: 'My Pringles', barcode: '0038000138416', servingLabel: '1 serving', servingGrams: 28, perServing: {kcal: 150, p: 1, c: 15, f: 9, fiber: 0}});
+  assert.equal((await T.lookupBarcode('038000138416')).name, 'My Pringles');
+});
+
+test('fast logging: + adds last time’s amount and can be undone; the calorie line reads goal − food = remaining', () => {
+  const T = loadApp();
+  const oats = {key: 'usda:o', source: 'usda', sourceId: 'o', name: 'Oats', per100: {kcal: 380, p: 13, c: 67, f: 7, fiber: 10}, servings: []};
+  T.S.food = [{id: 'l1', kind: 'log', date: Date.now() - DAY, meal: 'breakfast', food: oats, qty: 80, unit: 'g', qtyLabel: '80 g', grams: 80, totals: {kcal: 304, p: 10, c: 54, f: 6, fiber: 8}}];
+  T.S.sheet = {type: 'add-food', meal: 'breakfast', mode: 'search', q: ''};
+  assert.ok(T.viewSheet().includes('data-act="food-relog"'));
+  T.A['food-relog']({v: 0});
+  const added = T.S.food.filter(x => x.kind === 'log' && T.startOfDay(x.date) === T.startOfDay(Date.now()));
+  assert.equal(added.length, 1); assert.equal(added[0].grams, 80);
+  assert.equal(T.S.sheet.type, 'add-food', 'the sheet stays open for the next food');
+  T.A.undo();
+  assert.equal(T.S.food.filter(x => x.kind === 'log').length, 1);
+  T.S.sheet = null; T.S.tab = 'food';
+  T.S.profile.nutrition = {kcalMode: 'manual', kcal: 2400, split: 'percent', pct: {p: 30, f: 30}};
+  const html = T.viewFood();
+  assert.ok(html.includes('cal-line') && html.includes('Remaining') && html.includes('2,400'));
 });

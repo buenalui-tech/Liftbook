@@ -438,6 +438,8 @@ function viewSheet() {
       <button class="btn primary block" data-act="meal-save">Save meal</button>`;
   } else if (S.sheet.type === 'feedback') {
     body = viewFeedbackSheet();
+  } else if (S.sheet.type === 'collection') {
+    body = viewCollection();
   } else if (S.sheet.type === 'howto') {
     body = viewHowto();
   } else if (S.sheet.type === 'pick') {

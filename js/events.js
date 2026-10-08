@@ -25,7 +25,7 @@ const A = {
   finish: () => finishWorkout(),
   discard: () => { if (!arm('discard')) return; disarm(); discardWorkout(); },
   'sheet-close': () => { S.sheet = null; disarm(); render(); },
-  scrim: (d, ev) => { if (S.sheet && (S.sheet.edit || S.sheet.type === 'timer-setup')) return;   // don't drop unsaved edits on a stray tap
+  scrim: (d, ev) => { if (S.sheet && (S.sheet.edit || S.sheet.into || ['timer-setup', 'collection', 'custom-food'].includes(S.sheet.type))) return;   // don't drop unsaved edits on a stray tap
     if (ev.target.classList.contains('scrim')) { S.sheet = S.sheet && S.sheet.type === 'howto' && S.sheet.back || null; disarm(); render(); } },
   // a video opened from a list (adding an exercise) goes back to that list when it closes
   'howto': d => { S.sheet = {type: 'howto', exId: d.v, name: d.n, back: S.sheet && S.sheet.type !== 'howto' ? S.sheet : null}; render(); },
@@ -148,9 +148,49 @@ const A = {
   'po-meal': d => { S.sheet.meal = d.v; render(); },
   'portion-save': () => savePortion(),
   'portion-save-next': () => {
-    const meal = S.sheet.meal; savePortion();
-    if (S.sheet) return;   // didn't save (no amount)
-    Scale.tare(); S.sheet = {type: 'add-food', meal, mode: 'search', q: '', plate: true}; render();
+    const meal = S.sheet.meal, into = S.sheet.back && S.sheet.back.into;
+    if (!savePortion()) return;   // didn't save (no amount)
+    Scale.tare(); S.sheet = {type: 'add-food', meal, mode: 'search', q: '', plate: true, into}; render();
+  },
+  // fast logging, voice, label fixes
+  'food-relog': d => { const sh = S.sheet, e = sh.local && sh.local[+d.v]; if (e && e.last) relogLast(e, sh.meal); },
+  undo: () => { const f = undoFn; undoFn = null; const t = document.getElementById('toast'); if (t) t.hidden = true; if (f) f(); },
+  'food-mic': () => VoiceSearch.start(S.sheet),
+  'food-fix': () => { const sh = S.sheet; S.sheet = {type: 'custom-food', meal: sh.meal, pre: prefillFromFood(sh.food), into: sh.back && sh.back.into}; render(); },
+  'custom-edit': d => {
+    const c = S.food.find(x => x.id === d.v); if (!c) return;
+    S.sheet = {type: 'custom-food', meal: S.sheet.meal, editId: c.id, back: S.sheet, pre: {name: c.name, brand: c.brand, barcode: c.barcode, servingLabel: c.servingLabel, servingGrams: c.servingGrams, perServing: c.perServing}}; render();
+  },
+  'custom-del': () => { if (!arm('cfdel')) return; disarm(); const id = S.sheet.editId; S.food = S.food.filter(x => x.id !== id); store.deleteFood(id); S.sheet = S.sheet.back || null; render(); toast('Food deleted'); },
+  // recipes and meals: one editor
+  'recipe-new': () => openCollection('recipe', null),
+  'meal-new': () => openCollection('meal', null),
+  'recipe-edit': d => openCollection('recipe', d.v),
+  'meal-edit': d => openCollection('meal', d.v),
+  'coll-close': () => { S.sheet = S.sheet.back || null; disarm(); render(); },
+  'coll-add': () => { const sh = S.sheet; S.sheet = {type: 'add-food', meal: (sh.back && sh.back.meal) || 'snack', mode: 'search', q: '', into: sh}; render(); },
+  'into-back': () => { S.sheet = S.sheet.into; render(); },
+  'coll-serv': d => { const dr = S.sheet.draft; dr.servings = Math.max(1, Math.min(50, (+dr.servings || 1) + (+d.v))); render(); },
+  'coll-weigh': () => { const g = Scale.grams(); if (!(g > 0)) { toast('Zero the scale with the empty pot, then put the pot with the food on.'); return; } S.sheet.draft.cookedGrams = Math.round(g); render(); },
+  'coll-scale': d => {
+    const dr = S.sheet.draft, x = +d.v;
+    dr.items = dr.items.map(it => it.food.source === 'quick' ? {...it, totals: scaleNutr(it.totals, x)} : itemFromPortion(it.food, Math.round(it.qty * x * 100) / 100, it.unit));
+    dr.servings = Math.max(1, Math.round((+dr.servings || 1) * x)); if (dr.cookedGrams > 0) dr.cookedGrams = Math.round(dr.cookedGrams * x);
+    render(); toast(`Every ingredient × ${x}, ${fmtW(dr.servings)} servings`);
+  },
+  'ci-rm': d => { if (!arm('cirm' + d.i)) return; disarm(); S.sheet.draft.items.splice(+d.i, 1); render(); },
+  'coll-upd': () => { S.sheet.updateLogged = S.sheet.updateLogged === false; },
+  'coll-dup': () => {
+    const sh = S.sheet, draft = {...JSON.parse(JSON.stringify(sh.draft)), id: newId(), name: sh.draft.name + ' (copy)'};
+    S.sheet = {...sh, draft, isNew: true, updates: 0}; disarm(); render(); toast('Copy made. Change what’s different, then save.');
+  },
+  'coll-del': () => { if (!arm('colldel')) return; disarm(); const sh = S.sheet; S.food = S.food.filter(x => x.id !== sh.draft.id); store.deleteFood(sh.draft.id); S.sheet = sh.back || null; render(); toast(`${sh.draft.name || 'Deleted'} deleted`); },
+  'coll-save': d => {
+    const sh = S.sheet, rec = saveCollection(); if (!rec) return;
+    const back = sh.back, meal = d.v !== 'only' && back && back.type === 'add-food' && !back.into ? back.meal : null;
+    if (meal && rec.kind === 'meal') { logSavedMeal(rec, meal, S.day || startOfDay(Date.now())); S.sheet = null; render(); toast(`${rec.name} added to ${mealLabel(meal)}`); return; }
+    if (meal) { S.sheet = back; openPortion(recipeAsFood(rec), meal); return; }
+    S.sheet = back || null; render(); toast(`${rec.name} saved`);
   },
   'sc-weigh': async () => {
     const sh = S.sheet, start = () => { if (S.sheet === sh) { Object.assign(sh, {weigh: true, unit: 'g', qty: Math.max(0, Math.round(Scale.grams() || 0))}); render(); } };
@@ -169,10 +209,10 @@ const A = {
   'rec-copy': async () => { try { await navigator.clipboard.writeText(Scale.rec.lines.join('\n')); toast('Copied'); } catch { toast('Copying isn’t allowed here. Use Send instead.'); } },
   'food-del': () => { if (!arm('fdel')) return; disarm(); const id = S.sheet.editId; S.food = S.food.filter(x => x.id !== id); store.deleteFood(id); S.sheet = null; render(); toast('Removed'); },
   'quick-save': () => saveQuickAdd(),
-  'custom-new': d => { S.sheet = {type: 'custom-food', meal: (S.sheet && S.sheet.meal) || 'snack', barcode: d.v || ''}; render(); },
+  'custom-new': d => { S.sheet = {type: 'custom-food', meal: (S.sheet && S.sheet.meal) || 'snack', barcode: d.v || '', into: S.sheet && S.sheet.into}; render(); },
   'custom-save': () => saveCustomFood(),
-  'barcode-open': () => { S.sheet = {type: 'barcode', meal: S.sheet.meal}; render(); },
-  'barcode-close': () => { Scanner.stop(); S.sheet = {type: 'add-food', meal: S.sheet.meal, mode: 'search'}; render(); },
+  'barcode-open': () => { S.sheet = {type: 'barcode', meal: S.sheet.meal, into: S.sheet.into}; render(); },
+  'barcode-close': () => { Scanner.stop(); S.sheet = {type: 'add-food', meal: S.sheet.meal, mode: 'search', into: S.sheet.into}; render(); },
   'barcode-type': () => onBarcode((document.getElementById('scan-code') || {}).value || ''),
   'targets-open': () => { S.sheet = {type: 'targets'}; render(); },
   'tg-kmode': d => { const dr = S.sheet.draft; dr.kcalMode = d.v; if (d.v === 'manual' && !dr.kcal) { const a = autoCalories(); dr.kcal = a ? a.kcal : 2200; } render(); },
@@ -317,6 +357,14 @@ document.addEventListener('input', ev => {
   } else if (k === 'ed-date') { S.sheet.edit.dateStr = el.value;
   } else if (k === 'ed-name') { S.sheet.edit.routineName = el.value;
   } else if (k === 'fb-msg') { S.sheet.msg = el.value;
+  } else if (k === 'coll-name') { S.sheet.draft.name = el.value;
+  } else if (k === 'coll-cooked') { const n = parseFloat(el.value.replace(',', '.')); S.sheet.draft.cookedGrams = n > 0 ? n : null; paintCollection();
+  } else if (k === 'ci-qty') { setItemAmount(+el.dataset.i, parseFloat(el.value.replace(',', '.')), null);
+  } else if (k === 'ci-unit') {
+    // switching units keeps the same amount of food where both units have a weight
+    const it = S.sheet.draft.items[+el.dataset.i], u = unitsFor(it.food).find(x => x.id === el.value);
+    const qty = it.grams && u && u.grams ? Math.round(it.grams / u.grams * 100) / 100 : it.qty;
+    setItemAmount(+el.dataset.i, qty, el.value); const q = document.getElementById('ci-q-' + el.dataset.i); if (q) q.value = fmtW(qty);
   } else if (k === 'sc-demo') { Scale.demoG = +el.value;
   } else if (k === 'ts' || k === 'ts-step' || k === 'ts-name' || k === 'ts-ex') {
     const v = S.sheet.vals;
