@@ -1,0 +1,9 @@
+// Cloudflare hosting (Workers static assets). Cloudflare runs "bash tools/build-site.sh" and then
+// "npx wrangler deploy", which publishes dist/. The name must match the project name in the Cloudflare dashboard.
+{
+  "name": "liftbook",
+  "compatibility_date": "2026-10-01",
+  "assets": {
+    "directory": "./dist"
+  }
+}
