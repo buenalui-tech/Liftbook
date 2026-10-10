@@ -8,7 +8,13 @@ const toHex = b => Array.from(b, x => x.toString(16).padStart(2, '0')).join('');
 
 /* Etekcity Smart Nutrition Scale (ESN00). Protocol from the community write-up at github.com/hertzg/metekcity (MIT):
    FE EF C0 A2 · type · length · payload · checksum (low byte of type + length + payload).
-   Weight (type D0): sign, weight × 10 (big-endian), unit (0 = g), settled. */
+   Weight (type D0): sign, the number on the display (big-endian), the display unit, settled.
+   The scale weighs in grams and converts for its display; from the recorded samples: grams and ml are × 10,
+   ounces and fluid ounces × 100, "lb:oz" is total ounces × 100, fluid ounces are UK (28.41 ml),
+   and the milk modes divide by milk's density (1.03). */
+// unit code → [name, divisor, grams per unit]
+const ESN_UNITS = {0: ['g', 10, 1], 1: ['lb:oz', 100, 28.3495], 2: ['ml', 10, 1], 3: ['fl oz', 100, 28.4131], 4: ['ml (milk)', 10, 1.0296], 5: ['fl oz (milk)', 100, 28.4131 * 1.0296], 6: ['oz', 100, 28.3495]};
+const ESN_CODE = {g: 0, oz: 6, ml: 2, 'lb:oz': 1};
 function esnPacket(type, payload) {
   const body = [type, payload.length, ...payload], sum = body.reduce((s, b) => (s + b) & 0xff, 0);
   return new Uint8Array([0xfe, 0xef, 0xc0, 0xa2, ...body, sum]);
@@ -22,9 +28,9 @@ function esnParse(b) {
     const p = Array.from(b.slice(i + 6, end));
     if ([type, len, ...p].reduce((s, x) => (s + x) & 0xff, 0) !== b[end]) continue;
     if (type === 0xd0 && len >= 5) {
-      const v = ((p[1] << 8) | p[2]) / 10 * (p[0] ? -1 : 1);
-      out.push({grams: p[3] === 0 ? v : null, unit: p[3], stable: !!p[4]});
-    }
+      const u = ESN_UNITS[p[3]], shown = u ? ((p[1] << 8) | p[2]) / u[1] * (p[0] ? -1 : 1) : null;
+      out.push({grams: u ? Math.round(shown * u[2] * 10) / 10 : null, unit: p[3], shown, unitName: u ? u[0] : '?', stable: !!p[4]});
+    } else if (type === 0xd1 && len >= 1) out.push({unitState: p[0]});
     i = end;
   }
   return out;
@@ -33,8 +39,12 @@ const SCALE_DRIVERS = {
   esn00: {
     label: 'Etekcity Nutrition Scale', filters: [{name: 'Etekcity Nutrition Scale'}, {namePrefix: 'Etekcity'}],
     service: 0x1910, notify: 0x2c12, write: 0x2c11,
-    start: () => esnPacket(0xc0, [0x00]),   // show and send grams
+    start: () => esnPacket(0xc0, [ESN_CODE[setting('scaleUnit')] ?? 0]),   // the display unit you picked in Liftbook
+    unit: u => esnPacket(0xc0, [ESN_CODE[u] ?? 0]),
     tare: () => esnPacket(0xc1, [0x00]),
+    // nutrition on the display: 12 values, each × 10 in 3 bytes (calories, from fat, fat, saturated fat, trans fat,
+    // cholesterol, sodium, potassium, carbs, fiber, sugars, protein). Not yet confirmed on a real scale.
+    nutrition: v => esnPacket(0xc2, v.flatMap(x => { const n = Math.max(0, Math.min(999999, Math.round((x || 0) * 10))); return [n >> 16 & 0xff, n >> 8 & 0xff, n & 0xff]; })),
     parse: esnParse
   },
   // Decent Scale: published at decentespresso.com/decentscale_api. Weight is a signed 16-bit value × 10 in bytes 2–3.
@@ -101,18 +111,47 @@ const Scale = {
     S.profile.scaleName = this.name; store.saveProfile();
     this.changed(true);
   },
-  write(bytes) {
-    if (!this.wr) return Promise.resolve();
-    const w = this.wr.writeValueWithoutResponse ? this.wr.writeValueWithoutResponse(bytes) : this.wr.writeValue(bytes);
-    return Promise.resolve(w).catch(() => {});
+  // with response is the surer way; some browsers only offer one kind, so try each, and remember what happened
+  async write(bytes, quick) {
+    const wr = this.wr; if (!wr) { this.lastWrite = {ok: false, err: 'this scale has no command channel'}; return false; }
+    const ways = [quick && wr.writeValueWithoutResponse && (() => wr.writeValueWithoutResponse(bytes)), wr.writeValueWithResponse && (() => wr.writeValueWithResponse(bytes)),
+      wr.writeValue && (() => wr.writeValue(bytes)), !quick && wr.writeValueWithoutResponse && (() => wr.writeValueWithoutResponse(bytes))].filter(Boolean);
+    let err = null;
+    for (const w of ways) { try { await w(); this.lastWrite = {ok: true, at: Date.now()}; return true; } catch (e) { err = e; } }
+    this.lastWrite = {ok: false, err: errText(err), at: Date.now()}; return false;
+  },
+  // change the scale's display unit; if it doesn't switch, say so (Liftbook reads every unit either way)
+  async setUnit(u) {
+    if (this.demo || !this.drv || !this.drv.unit) return;
+    this.unitNote = '';
+    const ok = await this.write(this.drv.unit(u));
+    setTimeout(() => {
+      if (this.status !== 'on' || this.unitCode === ESN_CODE[u]) return;
+      this.unitNote = ok ? `The scale didn’t switch its display (it still shows ${ESN_UNITS[this.unitCode] ? ESN_UNITS[this.unitCode][0] : 'another unit'}). Liftbook still reads it correctly; you can also change units with the scale’s own button.`
+        : `The scale didn’t accept the command (${this.lastWrite && this.lastWrite.err}). Liftbook still reads every unit correctly.`;
+      this.changed(true);
+    }, 2500);
+  },
+  // the food being weighed, shown on the scale's display (beta); at most a few times a second
+  pushNutrition(food, grams) {
+    if (!setting('scaleNutrition') || this.demo || !this.drv || !this.drv.nutrition || !food) return;
+    const g = Math.max(0, Math.round(grams || 0));
+    if (g === this.nutriG && food.key === this.nutriKey) return;
+    clearTimeout(this.nutriT);
+    this.nutriT = setTimeout(() => {
+      this.nutriG = g; this.nutriKey = food.key;
+      const t = portionTotals(food, g, 'g').totals, m = food.micro || {}, x = food.per100 ? g / 100 : 0;
+      const v = [t.kcal, t.f * 9, t.f, (m.sf || 0) * x, 0, 0, (m.na || 0) * x, (m.k || 0) * x, t.c, t.fiber, 0, t.p];
+      this.write(this.drv.nutrition(v), true);
+    }, 250);
   },
   packet(bytes) { for (const r of this.drv.parse(bytes)) this.feed(r); },
   // a reading: steady once it has stayed within 1 g for most of a second (and the scale agrees, when it says)
   feed(r) {
-    if (r.grams == null) {   // the scale is showing another unit: ask for grams again, at most every 3 s
-      if (this.drv && this.drv.start && Date.now() - (this.unitAsked || 0) > 3000) { this.unitAsked = Date.now(); this.write(this.drv.start()); }
-      return;
-    }
+    if (r.unitState != null) { this.unitCode = r.unitState; return; }
+    if (r.unit != null) this.unitCode = r.unit;
+    if (r.grams == null) return;
+    if (r.shown != null) this.display = `${fmtW(Math.round(r.shown * 10) / 10)} ${r.unitName}`;
     const now = Date.now();
     this.raw = r.grams; this.hist.push([now, r.grams]); this.hist = this.hist.filter(h => now - h[0] < 900);
     const vals = this.hist.map(h => h[1]), span = Math.max(...vals) - Math.min(...vals);
@@ -185,14 +224,16 @@ const Scale = {
   paint() {
     const g = this.grams(), el = id => typeof document !== 'undefined' && document.getElementById(id);
     const big = el('sc-g'), st = el('sc-st');
-    if (big) big.textContent = g == null ? '—' : fmtW(Math.max(-9999, Math.round(g)));
+    const oz = setting('scaleUnit') === 'oz';
+    if (big) big.textContent = g == null ? '—' : oz ? fmtW(Math.round(g / OZ * 10) / 10) : fmtW(Math.max(-9999, Math.round(g)));
     if (st) { st.textContent = g == null ? 'Waiting for the scale…' : this.stable ? 'Steady' : 'Settling…'; st.className = 'small ' + (this.stable ? 'sc-steady' : 'muted'); }
     const sh = S.sheet;
     if (sh && sh.type === 'portion' && sh.weigh && g != null) {
-      const q = Math.max(0, Math.round(g));
-      if (q !== +sh.qty || sh.unit !== 'g') {
-        sh.qty = q; sh.unit = 'g';
-        const {grams, totals} = portionTotals(sh.food, q, 'g');
+      const u = oz ? 'oz' : 'g', q = oz ? Math.max(0, Math.round(g / OZ * 10) / 10) : Math.max(0, Math.round(g));
+      this.pushNutrition(sh.food, g);
+      if (q !== +sh.qty || sh.unit !== u) {
+        sh.qty = q; sh.unit = u;
+        const {grams, totals} = portionTotals(sh.food, q, u);
         const box = el('po-totals'); if (box) box.innerHTML = portionStats(totals, grams);
         const mi = el('po-micros'); if (mi) mi.innerHTML = portionMicros(sh.food, grams, q);
       }
@@ -210,7 +251,10 @@ function weighBlock(sh) {
     const g = Scale.grams();
     return `<div class="weigh">
       <div class="row between"><span class="small muted row" style="gap:6px"><i class="sc-dot"></i>${esc(Scale.name)}</span><span id="sc-st" class="small ${Scale.stable ? 'sc-steady' : 'muted'}">${g == null ? 'Waiting for the scale…' : Scale.stable ? 'Steady' : 'Settling…'}</span></div>
-      <div class="weigh-g num"><span id="sc-g">${g == null ? '—' : fmtW(Math.round(g))}</span><small>g</small></div>
+      <div class="weigh-g num"><span id="sc-g">${g == null ? '—' : setting('scaleUnit') === 'oz' ? fmtW(Math.round(g / OZ * 10) / 10) : fmtW(Math.round(g))}</span><small>${setting('scaleUnit') === 'oz' ? 'oz' : 'g'}</small></div>
+      <div class="row between"><div class="seg" role="group" aria-label="Units">${[['g', 'g'], ['oz', 'oz']].map(([v, l]) => `<button data-act="sc-unit" data-v="${v}" aria-pressed="${setting('scaleUnit') === v}">${l}</button>`).join('')}</div>
+        ${Scale.display && !Scale.demo ? `<span class="small muted">Scale shows ${esc(Scale.display)}</span>` : ''}</div>
+      ${Scale.unitNote ? `<p class="small muted" style="margin:0">${esc(Scale.unitNote)}</p>` : ''}
       ${Scale.demo ? `<label class="small muted">Demo: slide to put food on the scale<input type="range" id="sc-demo" data-in="sc-demo" min="0" max="600" step="1" value="${Scale.demoG}"></label>` : ''}
       <div class="row"><button class="btn grow" data-act="sc-tare">Zero</button><button class="btn grow" data-act="sc-manual">Type amount instead</button></div>
       <p class="small muted" style="margin:0">Using a plate or bowl? Put it on first and tap Zero, then add the food.</p></div>`;
@@ -235,6 +279,10 @@ function viewScaleSettings() {
       <span class="muted">Close the scale’s own app, tap the scale to wake it, and try again. If it isn’t in the list, use “Show all Bluetooth devices”.</span></div>` : ''}
     ${on ? '' : '<button class="btn ghost" data-act="sc-connect-any" style="align-self:flex-start;padding-left:0">Scale not in the list? Show all Bluetooth devices</button>'}
     <p class="small muted" style="margin:0">When you add a food, tap <b>Weigh on scale</b> and the grams fill in by themselves. Don’t pair the scale in its own app at the same time; a scale talks to one app at once.</p>
+    ${on && !Scale.demo ? `<div class="set-row"><span>Units</span><div class="seg" role="group" aria-label="Scale units">${[['g', 'g'], ['oz', 'oz']].map(([v, l]) => `<button data-act="sc-unit" data-v="${v}" aria-pressed="${setting('scaleUnit') === v}">${l}</button>`).join('')}</div></div>
+      ${Scale.unitNote ? `<p class="small muted" style="margin:0">${esc(Scale.unitNote)}</p>` : ''}
+      <label class="set-row"><span class="stack" style="gap:1px"><span>Show nutrition on the scale (beta)</span><span class="small muted">Sends the food you’re weighing to the scale’s screen</span></span>
+        <input type="checkbox" class="switch" data-act="set-toggle" data-v="scaleNutrition" ${setting('scaleNutrition') ? 'checked' : ''}></label>` : ''}
     ${on ? '' : '<button class="btn ghost" data-act="sc-demo-start" style="align-self:flex-start;padding-left:0">Try it with a demo scale</button>'}
     <details ${rec ? 'open' : ''}><summary class="small muted">Scale not connecting or reading wrong?</summary>
       <div class="stack" style="gap:8px;margin-top:8px">

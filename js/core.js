@@ -2,7 +2,7 @@
 // Classic script: files load in order (see index.html) and share top-level names.
 
 /* ---------- helpers ---------- */
-const APP_VERSION = '42';   // keep in step with VERSION in sw.js (liftbook-v42)
+const APP_VERSION = '43';   // keep in step with VERSION in sw.js (liftbook-v43)
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 const slug = s => String(s).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'exercise';

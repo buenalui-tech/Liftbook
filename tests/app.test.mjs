@@ -28,7 +28,7 @@ function loadApp(stored = {}, extra = {}) {
   vm.createContext(ctx);
   // top-level const/let live in the context's script scope; expose the names tests need
   const src = FILES.map(f => fs.readFileSync(new URL(`../js/${f}.js`, import.meta.url), 'utf8')).join('\n;\n') +
-    '\n;globalThis.T = {S, store, suggest, e1rm, niceTicks, weightSeries, weeklyRateKg, caloriesFor, improvements, recomputePRs, muscleLoad, musclesFor, tagFor, lastPerf, scanKg, conv, TEMPLATE, CATALOG, slug, startOfDay, fromUsda, fromOff, rankFoods, unitsFor, portionTotals, autoTargets, dayTotals, estimateBurn, targets, targetsFromBurn, computeTargets, nutritionPrefs, proposeTargets, applyCheckin, runAutoCheckin, checkinDue, copyMeal, foodLogs, viewToday, viewFood, viewProgress, viewBody, viewProgram, viewSheet, viewWorkout, startWorkout, viewSettings, buildPhases, Timer, viewTimer, viewTimerSetup, viewMobilitySetup, MOBILITY, viewTrainingLoad, sessionLoad, specFromVals, specToSheet, cleanSpec, specSecs, finishWorkout, timerOutline, viewTimerSetup, microFromUsda, microFromOff, entryMicro, viewMicros, Micro, fromUsda, portionMicros, Scale, esnParse, esnPacket, openPortion, viewPortion, A, viewSettings, matchesQuery, localMatches, searchResultsHTML, onFoodQuery, rememberSearch, searchCache, viewAddFood, ytId, formVideo, FORM_VIDEOS, viewHowto, holdForVideo, playBtn, openCollection, saveCollection, recipeAsFood, setItemAmount, parseSpoken, applySpoken, lookupBarcode, relogLast, savePortion, viewCollection, TEMPLATE_COPY: () => JSON.parse(JSON.stringify(TEMPLATE))};';
+    '\n;globalThis.T = {S, store, suggest, e1rm, niceTicks, weightSeries, weeklyRateKg, caloriesFor, improvements, recomputePRs, muscleLoad, musclesFor, tagFor, lastPerf, scanKg, conv, TEMPLATE, CATALOG, slug, startOfDay, fromUsda, fromOff, rankFoods, unitsFor, portionTotals, autoTargets, dayTotals, estimateBurn, targets, targetsFromBurn, computeTargets, nutritionPrefs, proposeTargets, applyCheckin, runAutoCheckin, checkinDue, copyMeal, foodLogs, viewToday, viewFood, viewProgress, viewBody, viewProgram, viewSheet, viewWorkout, startWorkout, viewSettings, buildPhases, Timer, viewTimer, viewTimerSetup, viewMobilitySetup, MOBILITY, viewTrainingLoad, sessionLoad, specFromVals, specToSheet, cleanSpec, specSecs, finishWorkout, timerOutline, viewTimerSetup, microFromUsda, microFromOff, entryMicro, viewMicros, Micro, fromUsda, portionMicros, Scale, esnParse, esnPacket, SCALE_DRIVERS, openPortion, viewPortion, A, viewSettings, matchesQuery, localMatches, searchResultsHTML, onFoodQuery, rememberSearch, searchCache, viewAddFood, ytId, formVideo, FORM_VIDEOS, viewHowto, holdForVideo, playBtn, openCollection, saveCollection, recipeAsFood, setItemAmount, parseSpoken, applySpoken, lookupBarcode, relogLast, savePortion, viewCollection, TEMPLATE_COPY: () => JSON.parse(JSON.stringify(TEMPLATE))};';
   vm.runInContext(src, ctx, {filename: 'liftbook.js'});
   return ctx.T;
 }
@@ -507,13 +507,23 @@ test('food scale: Etekcity packets, live grams into the portion, zero, and weigh
   const T = loadApp();
   const hex = s => new Uint8Array(s.match(/../g).map(x => parseInt(x, 16)));
   // known samples from the ESN00 write-up
-  assert.equal(JSON.stringify(T.esnParse(hex('feefc0a2d00501146e000159'))), JSON.stringify([{grams: -523, unit: 0, stable: true}]));
-  assert.equal(T.esnParse(hex('feefc0a2d005002a26020027'))[0].grams, null, 'another unit on the display is not read as grams');
+  const r0 = T.esnParse(hex('feefc0a2d00501146e000159'))[0];
+  assert.equal(`${r0.grams} ${r0.unitName} ${r0.stable}`, '-523 g true');
+  // every display unit is read back to grams (samples from the write-up: the same 1,079 g in each unit)
+  const pkt = body => { const b = hex(body), sum = [0xd0, 5, ...b].reduce((s, x) => (s + x) & 0xff, 0); return hex('feefc0a2d005' + body + sum.toString(16).padStart(2, '0')); };
+  const g = body => T.esnParse(pkt(body))[0].grams;
+  assert.equal(g('002a260001'), 1079, 'grams');
+  assert.ok(Math.abs(g('000ee20601') - 1080) < 1, '38.1 oz');
+  assert.ok(Math.abs(g('000ee20101') - 1080) < 1, '2 lb 6.1 oz');
+  assert.ok(Math.abs(g('000ed80301') - 1079) < 1, '38.0 fl oz (UK)');
+  assert.ok(Math.abs(g('0028f00401') - 1079) < 1, '1,048 ml of milk');
+  assert.equal(T.esnParse(pkt('002a260201'))[0].unitName, 'ml');
   assert.equal(T.esnParse(hex('feefc0a2d00501146e000158')).length, 0, 'a bad checksum is ignored');
   assert.equal(T.esnParse(hex('feefc0a2d00500003c0001' + '12' + 'feefc0a2d0050000460000' + '1b')).map(r => r.grams).join(), '6,7', 'two packets in one notification');
   const toHex = b => Array.from(b, x => x.toString(16).padStart(2, '0')).join('');
   assert.equal(toHex(T.esnPacket(0xc1, [0])), 'feefc0a2c10100c2', 'tare');
   assert.equal(toHex(T.esnPacket(0xc0, [0])), 'feefc0a2c00100c1', 'grams');
+  assert.equal(T.SCALE_DRIVERS.esn00.nutrition([250, 9, 1, 0, 0, 0, 0, 0, 0, 0, 0, 31]).length, 6 + 36 + 1, 'nutrition: 12 values of 3 bytes');
   // no Bluetooth here, so no Weigh button; the demo scale still shows the whole flow
   const chicken = {key: 'usda:1', source: 'usda', sourceId: '1', name: 'Chicken breast', per100: {kcal: 165, p: 31, c: 0, f: 3.6, fiber: 0}, servings: []};
   T.S.sheet = {type: 'add-food', meal: 'dinner', mode: 'search'};

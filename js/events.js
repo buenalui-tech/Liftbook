@@ -233,6 +233,12 @@ const A = {
   },
   'sc-manual': () => { S.sheet.weigh = false; render(); },
   'sc-tare': () => Scale.tare(),
+  'sc-unit': d => {
+    setSetting('scaleUnit', d.v); Scale.setUnit(d.v);
+    const sh = S.sheet;   // the amount being weighed switches with it
+    if (sh && sh.type === 'portion' && sh.weigh) { sh.unit = d.v; sh.qty = d.v === 'oz' ? Math.round((Scale.grams() || 0) / OZ * 10) / 10 : Math.round(Scale.grams() || 0); }
+    render();
+  },
   'sc-connect': async () => { try { await Scale.connect(); toast(`${Scale.name} connected`); } catch (e) { if (e.name !== 'NotFoundError') toast('Couldn’t connect. Details are under Food scale.'); } },
   'sc-connect-any': async () => { try { await Scale.connect(true); toast(`${Scale.name} connected`); } catch (e) { if (e.name !== 'NotFoundError') toast('Couldn’t connect. Details are under Food scale.'); } },
   'sc-disconnect': () => Scale.disconnect(),
