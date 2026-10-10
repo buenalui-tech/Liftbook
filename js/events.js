@@ -229,11 +229,12 @@ const A = {
     const sh = S.sheet, start = () => { if (S.sheet === sh) { Object.assign(sh, {weigh: true, unit: 'g', qty: Math.max(0, Math.round(Scale.grams() || 0))}); render(); } };
     if (Scale.status === 'on') { start(); return; }
     try { if (Scale.status === 'lost' && Scale.dev) await Scale.attach(Scale.dev); else await Scale.connect(); start(); }
-    catch (e) { if (e.name !== 'NotFoundError') toast(e.message || 'Couldn’t connect to the scale.'); }
+    catch (e) { if (e.name !== 'NotFoundError') toast(`Couldn’t connect: ${errText(e)}`); }
   },
   'sc-manual': () => { S.sheet.weigh = false; render(); },
   'sc-tare': () => Scale.tare(),
-  'sc-connect': async () => { try { await Scale.connect(); toast(`${Scale.name} connected`); } catch (e) { if (e.name !== 'NotFoundError') toast(e.message || 'Couldn’t connect to the scale.'); } },
+  'sc-connect': async () => { try { await Scale.connect(); toast(`${Scale.name} connected`); } catch (e) { if (e.name !== 'NotFoundError') toast('Couldn’t connect. Details are under Food scale.'); } },
+  'sc-connect-any': async () => { try { await Scale.connect(true); toast(`${Scale.name} connected`); } catch (e) { if (e.name !== 'NotFoundError') toast('Couldn’t connect. Details are under Food scale.'); } },
   'sc-disconnect': () => Scale.disconnect(),
   'sc-demo-start': () => { Scale.startDemo(); toast('Demo scale on. Add a food and tap Weigh on scale.'); },
   'rec-start': async () => { try { await Scale.record(); } catch (e) { Scale.rec = null; render(); if (e.name !== 'NotFoundError') toast(e.message || 'Couldn’t connect.'); } },

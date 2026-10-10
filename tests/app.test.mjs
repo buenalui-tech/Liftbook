@@ -731,3 +731,16 @@ test('account: forgot password, change password and delete account are reachable
   T.S.sheet = null;
   assert.ok(T.viewSettings().includes('privacy.html'), 'the privacy policy is linked from Settings');
 });
+
+test('food scale: a failed connection says which step failed, and every device can be listed', async () => {
+  const asked = [];
+  const bluetooth = {requestDevice: async opts => { asked.push(opts); return {name: 'Etekcity Nutrition Scale', addEventListener() {}, gatt: {connect: async () => { throw Object.assign(new Error('Connection attempt failed.'), {name: 'NetworkError'}); }}}; }};
+  const T = loadApp({}, {navigator: {onLine: true, userAgent: 'node', maxTouchPoints: 0, bluetooth}});
+  await assert.rejects(T.Scale.connect());
+  assert.equal(T.Scale.lastErr.step, 'gatt');
+  const html = T.viewSettings();
+  assert.ok(html.includes('connecting to the scale') && html.includes('Connection attempt failed.'), 'the step and the browser’s own words are shown');
+  assert.ok(asked[0].optionalServices.includes('00001910-0000-1000-8000-00805f9b34fb'), 'full service names');
+  await assert.rejects(T.Scale.connect(true));
+  assert.equal(asked[1].acceptAllDevices, true);
+});

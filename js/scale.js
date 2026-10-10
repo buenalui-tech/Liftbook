@@ -48,6 +48,12 @@ const SCALE_DRIVERS = {
 };
 // services the recorder asks for, so an unknown scale's data can still be captured
 const SCALE_SERVICES = [0x1910, 0xfff0, 0xffe0, 0xffb0, 0xffd0, 0x181d, 0x180a, 0x180f];
+// full 128-bit names for 16-bit Bluetooth ids: some browsers (Bluefy among them) are stricter than Chrome about short ones
+const uuid16 = n => typeof n === 'number' ? `0000${n.toString(16).padStart(4, '0')}-0000-1000-8000-00805f9b34fb` : n;
+const bytesOf = v => new Uint8Array(v.buffer, v.byteOffset || 0, v.byteLength);
+const errText = e => (e && (e.message || e.name)) || String(e || 'unknown error');
+// what each connection step is called when it fails, so a problem can be pinned down
+const SCALE_STEPS = {pick: 'opening the device list', gatt: 'connecting to the scale', service: 'finding the scale’s weight data', notify: 'starting the live weight', start: 'sending the start signal'};
 
 const Scale = {
   status: 'off',   // off | connecting | on | lost
@@ -56,28 +62,41 @@ const Scale = {
   rec: null,       // the recorder: {name, lines, packets}
   supported: () => typeof navigator !== 'undefined' && !!(navigator.bluetooth && navigator.bluetooth.requestDevice),
   grams() { return this.raw == null ? null : Math.round((this.raw - this.offset) * 10) / 10; },
-  async connect() {
+  // any: list every Bluetooth device, for a scale that names itself differently than expected
+  async connect(any) {
     if (!this.supported()) throw Object.assign(new Error('Bluetooth isn’t available in this browser.'), {name: 'Unsupported'});
-    this.stopDemo();
-    const drivers = Object.values(SCALE_DRIVERS);
-    // asked for inside the tap: browsers only show the scale picker in response to one
-    const pick = navigator.bluetooth.requestDevice({filters: drivers.flatMap(d => d.filters), optionalServices: [...new Set(drivers.map(d => d.service))]});
+    this.stopDemo(); this.lastErr = null; this.step = 'pick';
+    const drivers = Object.values(SCALE_DRIVERS), services = [...new Set([...drivers.map(d => d.service), ...SCALE_SERVICES])].map(uuid16);
+    // asked for inside the tap: browsers only show the device list in response to one
+    let pick;
+    try {
+      pick = navigator.bluetooth.requestDevice(any ? {acceptAllDevices: true, optionalServices: services}
+        : {filters: drivers.flatMap(d => d.filters), optionalServices: services});
+    } catch (e) { pick = Promise.reject(e); }
     this.status = 'connecting'; this.changed(true);
     try { await this.attach(await pick); }
-    catch (e) { this.status = 'off'; this.changed(true); throw e; }
+    catch (e) {
+      this.status = 'off';
+      if (e && e.name !== 'NotFoundError') this.lastErr = {step: this.step, text: errText(e), name: e && e.name, device: this.name, at: Date.now()};
+      this.changed(true); throw e;
+    }
   },
   async attach(dev) {
+    this.step = 'gatt';
     if (this.dev !== dev) { this.dev = dev; dev.addEventListener('gattserverdisconnected', () => this.lost()); }
     this.name = dev.name || 'Scale';
     const gatt = await dev.gatt.connect();
+    this.step = 'service';
     let drv = null, svc = null;
-    for (const d of Object.values(SCALE_DRIVERS)) { try { svc = await gatt.getPrimaryService(d.service); drv = d; break; } catch {} }
-    if (!drv) { try { gatt.disconnect(); } catch {} throw Object.assign(new Error('This scale isn’t supported yet. Settings → Food scale → Record scale data helps add it.'), {name: 'UnknownScale'}); }
-    const nt = await svc.getCharacteristic(drv.notify);
-    this.wr = drv.write ? await svc.getCharacteristic(drv.write).catch(() => null) : null;
-    nt.addEventListener('characteristicvaluechanged', e => this.packet(new Uint8Array(e.target.value.buffer)));
+    for (const d of Object.values(SCALE_DRIVERS)) { try { svc = await gatt.getPrimaryService(uuid16(d.service)); drv = d; break; } catch {} }
+    if (!drv) { try { gatt.disconnect(); } catch {} throw Object.assign(new Error('This device doesn’t have a known scale’s weight data. Record scale data (below) helps add it.'), {name: 'UnknownScale'}); }
+    this.step = 'notify';
+    const nt = await svc.getCharacteristic(uuid16(drv.notify));
+    this.wr = drv.write ? await svc.getCharacteristic(uuid16(drv.write)).catch(() => null) : null;
+    nt.addEventListener('characteristicvaluechanged', e => this.packet(bytesOf(e.target.value)));
     await nt.startNotifications();
-    Object.assign(this, {drv, status: 'on', raw: null, offset: 0, stable: false, hist: []});
+    this.step = 'start';
+    Object.assign(this, {drv, status: 'on', raw: null, offset: 0, stable: false, hist: [], lastErr: null});
     if (drv.start) await this.write(drv.start());
     S.profile.scaleName = this.name; store.saveProfile();
     this.changed(true);
@@ -134,7 +153,7 @@ const Scale = {
   /* The recorder: connects to any Bluetooth device and keeps everything it sends, so a scale that doesn't
      connect (or reads wrong) can be added from a real recording instead of guesses. */
   async record() {
-    const pick = navigator.bluetooth.requestDevice({acceptAllDevices: true, optionalServices: SCALE_SERVICES});
+    const pick = navigator.bluetooth.requestDevice({acceptAllDevices: true, optionalServices: SCALE_SERVICES.map(uuid16)});
     this.rec = {name: '', lines: [], packets: 0, t0: Date.now()};
     const dev = await pick, rec = this.rec, line = s => { if (rec.lines.length < 600) rec.lines.push(`${((Date.now() - rec.t0) / 1000).toFixed(1)} ${s}`); };
     rec.name = dev.name || 'unnamed device'; rec.dev = dev; line(`device "${rec.name}"`);
@@ -145,7 +164,7 @@ const Scale = {
         line(`char ${s.uuid.slice(4, 8)}/${c.uuid.slice(4, 8)} ${props}`);
         if (p.notify || p.indicate) {
           c.addEventListener('characteristicvaluechanged', e => {
-            const b = new Uint8Array(e.target.value.buffer); rec.packets++;
+            const b = bytesOf(e.target.value); rec.packets++;
             const g = Object.values(SCALE_DRIVERS).flatMap(d => d.parse(b)).find(r => r.grams != null);
             line(`${c.uuid.slice(4, 8)} ${toHex(b)}${g ? ` = ${g.grams} g${g.stable ? ' steady' : ''}` : ''}`);
             const el = document.getElementById('rec-count'); if (el) el.textContent = `${rec.packets} readings recorded`;
@@ -212,6 +231,9 @@ function viewScaleSettings() {
     <div class="set-row"><span class="stack" style="gap:1px"><span>${on ? esc(Scale.name) : Scale.status === 'connecting' ? 'Connecting…' : 'Not connected'}</span>
       <span class="small muted">${on ? (Scale.demo ? 'Pretend weights, to try the flow' : 'Connected') : S.profile.scaleName ? `Last used: ${esc(S.profile.scaleName)}` : 'Etekcity Smart Nutrition Scale (ESN00)'}</span></span>
       ${on ? '<button class="btn" data-act="sc-disconnect">Disconnect</button>' : '<button class="btn primary" data-act="sc-connect">Connect</button>'}</div>
+    ${Scale.lastErr ? `<div class="banner small" style="flex-direction:column;align-items:flex-start;gap:6px"><span><b>Couldn’t connect</b> while ${esc(SCALE_STEPS[Scale.lastErr.step] || Scale.lastErr.step)}${Scale.lastErr.device && Scale.lastErr.step !== 'pick' ? ` (${esc(Scale.lastErr.device)})` : ''}:</span><span class="num">${esc(Scale.lastErr.text)}</span>
+      <span class="muted">Close the scale’s own app, tap the scale to wake it, and try again. If it isn’t in the list, use “Show all Bluetooth devices”.</span></div>` : ''}
+    ${on ? '' : '<button class="btn ghost" data-act="sc-connect-any" style="align-self:flex-start;padding-left:0">Scale not in the list? Show all Bluetooth devices</button>'}
     <p class="small muted" style="margin:0">When you add a food, tap <b>Weigh on scale</b> and the grams fill in by themselves. Don’t pair the scale in its own app at the same time; a scale talks to one app at once.</p>
     ${on ? '' : '<button class="btn ghost" data-act="sc-demo-start" style="align-self:flex-start;padding-left:0">Try it with a demo scale</button>'}
     <details ${rec ? 'open' : ''}><summary class="small muted">Scale not connecting or reading wrong?</summary>
