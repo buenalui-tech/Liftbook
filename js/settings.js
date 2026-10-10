@@ -1,7 +1,7 @@
 // Liftbook — Settings: appearance, rest timer sound and behaviour, units, account, backups.
 // Classic script: files load in order (see index.html) and share top-level names.
 
-const SETTING_DEFAULTS = {theme: 'system', accent: 'blue', sound: 'beep', volume: 0.7, countdown: true, vibrate: true, keepAwake: true, autoRest: true, checkinMode: 'ask', voice: true, scaleUnit: 'g', scaleNutrition: true};
+const SETTING_DEFAULTS = {theme: 'system', accent: 'blue', sound: 'beep', volume: 0.7, countdown: true, vibrate: true, keepAwake: true, autoRest: true, checkinMode: 'ask', voice: true, scaleUnit: 'g', scaleNutrition: true, scaleNutriFmt: 'a'};
 const setting = k => { const s = S.profile.settings || {}; return s[k] ?? SETTING_DEFAULTS[k]; };
 function setSetting(k, v) { S.profile.settings = {...(S.profile.settings || {}), [k]: v}; store.saveProfile(); applyAppearance(); }
 

@@ -233,12 +233,7 @@ const A = {
   },
   'sc-manual': () => { S.sheet.weigh = false; render(); },
   'sc-tare': () => Scale.tare(),
-  'sc-unit': d => {
-    setSetting('scaleUnit', d.v); Scale.setUnit(d.v);
-    const sh = S.sheet;   // the amount being weighed switches with it
-    if (sh && sh.type === 'portion' && sh.weigh) { sh.unit = d.v; sh.qty = d.v === 'oz' ? Math.round((Scale.grams() || 0) / OZ * 10) / 10 : Math.round(Scale.grams() || 0); }
-    render();
-  },
+  'sc-ntest': d => { setSetting('scaleNutriFmt', d.v); Scale.testNutrition(d.v); },
   'sc-connect': async () => { try { await Scale.connect(); toast(`${Scale.name} connected`); } catch (e) { if (e.name !== 'NotFoundError') toast('Couldn’t connect. Details are under Food scale.'); } },
   'sc-connect-any': async () => { try { await Scale.connect(true); toast(`${Scale.name} connected`); } catch (e) { if (e.name !== 'NotFoundError') toast('Couldn’t connect. Details are under Food scale.'); } },
   'sc-disconnect': () => Scale.disconnect(),
@@ -406,6 +401,12 @@ document.addEventListener('input', ev => {
     const qty = it.grams && u && u.grams ? Math.round(it.grams / u.grams * 100) / 100 : it.qty;
     setItemAmount(+el.dataset.i, qty, el.value); const q = document.getElementById('ci-q-' + el.dataset.i); if (q) q.value = fmtW(qty);
   } else if (k === 'sc-demo') { Scale.demoG = +el.value;
+  } else if (k === 'sc-unit') {
+    // the scale's display and the amount being weighed both switch
+    setSetting('scaleUnit', el.value); Scale.setUnit(el.value);
+    const sh = S.sheet;
+    if (sh && sh.type === 'portion' && sh.weigh) { const a = scaleAmount(Scale.grams() || 0); sh.unit = a.unit; sh.qty = a.q; }
+    render();
   } else if (k === 'ts' || k === 'ts-step' || k === 'ts-name' || k === 'ts-ex') {
     const v = S.sheet.vals;
     if (k === 'ts') { const n = (el.dataset.k === 'warmup' || el.dataset.k === 'cooldown' ? parseFloat : parseInt)(el.value.replace(',', '.'), 10); v[el.dataset.k] = isNaN(n) ? null : n; }

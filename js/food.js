@@ -11,6 +11,8 @@
 const MEALS = [['breakfast', 'Breakfast'], ['lunch', 'Lunch'], ['dinner', 'Dinner'], ['snack', 'Snacks']];
 const ZXING_URL = 'https://cdn.jsdelivr.net/npm/@zxing/library@0.21.3/umd/index.min.js';
 const OZ = 28.3495;
+// a US fluid ounce in the US, an imperial one elsewhere (the scale's own display follows the same split)
+const FLOZ_G = typeof navigator !== 'undefined' && /-US$/i.test(navigator.language || '') ? 29.5735 : 28.4131;
 const r1 = n => Math.round(n * 10) / 10;
 const NUTRIENTS0 = () => ({kcal: 0, p: 0, c: 0, f: 0, fiber: 0});
 const usdaKey = () => CFG.usdaApiKey || 'DEMO_KEY';
@@ -128,7 +130,8 @@ function unitsFor(food) {
   const word = (food.name.toLowerCase().match(/[a-z]+/) || [''])[0].replace(/(e?s)$/, '');
   const natural = s => /^1 (serving|bar|piece|egg|slice|large|medium|small)\b/i.test(s.label) || (word && s.label.toLowerCase().startsWith('1 ' + word)) ? 0 : 1;
   const servs = food.servings.map((s, i) => ({id: 's' + i, label: s.label, grams: s.grams})).sort((a, b) => natural(a) - natural(b));
-  return [...servs, {id: 'g', label: 'grams', grams: 1}, {id: 'oz', label: 'oz', grams: OZ}];
+  // ml and fl oz count as water (1 g per ml): exact for drinks like milk within a few percent
+  return [...servs, {id: 'g', label: 'grams', grams: 1}, {id: 'oz', label: 'oz', grams: OZ}, {id: 'ml', label: 'ml', grams: 1}, {id: 'floz', label: 'fl oz', grams: FLOZ_G}];
 }
 function portionTotals(food, qty, unitId) {
   const u = unitsFor(food).find(x => x.id === unitId) || unitsFor(food)[0];
@@ -423,7 +426,7 @@ function savePortion() {
   if (sh.food.source !== 'quick' && !(qty > 0)) { toast('Enter an amount, like 1 or 150.'); return false; }
   const u = unitsFor(sh.food).find(x => x.id === sh.unit) || unitsFor(sh.food)[0];
   const {grams, totals} = portionTotals(sh.food, sh.food.source === 'quick' ? 1 : qty, sh.unit);
-  const qtyLabel = sh.food.source === 'quick' ? '' : u.id === 'g' ? `${fmtW(qty)} g` : u.id === 'oz' ? `${fmtW(qty)} oz`
+  const qtyLabel = sh.food.source === 'quick' ? '' : u.id === 'g' ? `${fmtW(qty)} g` : u.id === 'oz' ? `${fmtW(qty)} oz` : u.id === 'ml' ? `${fmtW(qty)} ml` : u.id === 'floz' ? `${fmtW(qty)} fl oz`
     : /^1 /.test(u.label) ? `${fmtW(qty)} ${u.label.slice(2)}` : `${fmtW(qty)} × ${u.label}`;
   // building a recipe or a meal: the portion becomes one of its items
   const into = sh.back && sh.back.into;

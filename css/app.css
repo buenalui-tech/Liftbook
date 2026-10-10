@@ -473,5 +473,6 @@ textarea.note-in{width:100%;border:1px solid var(--line);border-radius:8px;backg
 @keyframes pulse{50%{box-shadow:0 0 0 6px rgba(200,31,52,.2)}}
 @media (prefers-reduced-motion: reduce){.mic.on{animation:none}}
 .toast-undo{margin-left:12px;border:0;background:transparent;color:var(--bg);font-weight:700;text-decoration:underline;padding:0}
+.unit-pick{height:40px;border:1px solid var(--line);border-radius:10px;background:var(--surface);color:var(--ink);font-size:15px;font-weight:600;padding:0 10px}
 .toast{position:fixed;left:50%;transform:translateX(-50%);top:calc(12px + env(safe-area-inset-top,0px));z-index:20;background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:10px;font-weight:600;font-size:14px;max-width:calc(100% - 32px)}
 @media (prefers-reduced-motion: no-preference){.set.done{transition:background .2s}.rest .fill{transition:width .25s linear}}

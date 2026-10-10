@@ -28,7 +28,7 @@ function loadApp(stored = {}, extra = {}) {
   vm.createContext(ctx);
   // top-level const/let live in the context's script scope; expose the names tests need
   const src = FILES.map(f => fs.readFileSync(new URL(`../js/${f}.js`, import.meta.url), 'utf8')).join('\n;\n') +
-    '\n;globalThis.T = {S, store, suggest, e1rm, niceTicks, weightSeries, weeklyRateKg, caloriesFor, improvements, recomputePRs, muscleLoad, musclesFor, tagFor, lastPerf, scanKg, conv, TEMPLATE, CATALOG, slug, startOfDay, fromUsda, fromOff, rankFoods, unitsFor, portionTotals, autoTargets, dayTotals, estimateBurn, targets, targetsFromBurn, computeTargets, nutritionPrefs, proposeTargets, applyCheckin, runAutoCheckin, checkinDue, copyMeal, foodLogs, viewToday, viewFood, viewProgress, viewBody, viewProgram, viewSheet, viewWorkout, startWorkout, viewSettings, buildPhases, Timer, viewTimer, viewTimerSetup, viewMobilitySetup, MOBILITY, viewTrainingLoad, sessionLoad, specFromVals, specToSheet, cleanSpec, specSecs, finishWorkout, timerOutline, viewTimerSetup, microFromUsda, microFromOff, entryMicro, viewMicros, Micro, fromUsda, portionMicros, Scale, esnParse, esnPacket, SCALE_DRIVERS, openPortion, viewPortion, A, viewSettings, matchesQuery, localMatches, searchResultsHTML, onFoodQuery, rememberSearch, searchCache, viewAddFood, ytId, formVideo, FORM_VIDEOS, viewHowto, holdForVideo, playBtn, openCollection, saveCollection, recipeAsFood, setItemAmount, parseSpoken, applySpoken, lookupBarcode, relogLast, savePortion, viewCollection, TEMPLATE_COPY: () => JSON.parse(JSON.stringify(TEMPLATE))};';
+    '\n;globalThis.T = {S, store, suggest, e1rm, niceTicks, weightSeries, weeklyRateKg, caloriesFor, improvements, recomputePRs, muscleLoad, musclesFor, tagFor, lastPerf, scanKg, conv, TEMPLATE, CATALOG, slug, startOfDay, fromUsda, fromOff, rankFoods, unitsFor, portionTotals, autoTargets, dayTotals, estimateBurn, targets, targetsFromBurn, computeTargets, nutritionPrefs, proposeTargets, applyCheckin, runAutoCheckin, checkinDue, copyMeal, foodLogs, viewToday, viewFood, viewProgress, viewBody, viewProgram, viewSheet, viewWorkout, startWorkout, viewSettings, buildPhases, Timer, viewTimer, viewTimerSetup, viewMobilitySetup, MOBILITY, viewTrainingLoad, sessionLoad, specFromVals, specToSheet, cleanSpec, specSecs, finishWorkout, timerOutline, viewTimerSetup, microFromUsda, microFromOff, entryMicro, viewMicros, Micro, fromUsda, portionMicros, Scale, esnParse, esnPacket, SCALE_DRIVERS, scaleAmount, openPortion, viewPortion, A, viewSettings, matchesQuery, localMatches, searchResultsHTML, onFoodQuery, rememberSearch, searchCache, viewAddFood, ytId, formVideo, FORM_VIDEOS, viewHowto, holdForVideo, playBtn, openCollection, saveCollection, recipeAsFood, setItemAmount, parseSpoken, applySpoken, lookupBarcode, relogLast, savePortion, viewCollection, TEMPLATE_COPY: () => JSON.parse(JSON.stringify(TEMPLATE))};';
   vm.runInContext(src, ctx, {filename: 'liftbook.js'});
   return ctx.T;
 }
@@ -753,4 +753,17 @@ test('food scale: a failed connection says which step failed, and every device c
   assert.ok(asked[0].optionalServices.includes('00001910-0000-1000-8000-00805f9b34fb'), 'full service names');
   await assert.rejects(T.Scale.connect(true));
   assert.equal(asked[1].acceptAllDevices, true);
+});
+
+test('food scale: every display unit can be picked, and the amount logs in that unit', () => {
+  const T = loadApp();
+  const amt = (u, g) => { T.S.profile.settings = {scaleUnit: u}; const a = T.scaleAmount(g); return `${a.big} ${a.label} → ${a.q} ${a.unit}`; };
+  assert.equal(amt('g', 250), '250 g → 250 g');
+  assert.equal(amt('ml', 250), '250 ml → 250 ml');
+  assert.equal(amt('oz', 170), '6 oz → 6 oz');
+  assert.equal(amt('lboz', 1080), '2:6.1 lb:oz → 38.1 oz', 'pounds and ounces, logged as ounces');
+  assert.equal(amt('mlmilk', 257.4), '250 ml → 250 ml', 'milk mode shows what the scale shows');
+  const chicken = {name: 'Milk, 2%', per100: {kcal: 50, p: 3.3, c: 4.8, f: 2, fiber: 0}, servings: []};
+  assert.ok(T.unitsFor(chicken).some(u => u.id === 'ml') && T.unitsFor(chicken).some(u => u.id === 'floz'));
+  assert.equal(T.portionTotals(chicken, 250, 'ml').totals.kcal, 125);
 });

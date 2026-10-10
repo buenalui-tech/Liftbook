@@ -33,7 +33,7 @@ const itemFromPortion = (food, qty, unitId) => {
 };
 function qtyLabelFor(food, qty, u) {
   if (food.source === 'quick') return '';
-  return u.id === 'g' ? `${fmtW(qty)} g` : u.id === 'oz' ? `${fmtW(qty)} oz` : /^1 /.test(u.label) ? `${fmtW(qty)} ${u.label.slice(2)}` : `${fmtW(qty)} × ${u.label}`;
+  return u.id === 'g' ? `${fmtW(qty)} g` : u.id === 'oz' ? `${fmtW(qty)} oz` : u.id === 'ml' ? `${fmtW(qty)} ml` : u.id === 'floz' ? `${fmtW(qty)} fl oz` : /^1 /.test(u.label) ? `${fmtW(qty)} ${u.label.slice(2)}` : `${fmtW(qty)} × ${u.label}`;
 }
 
 /* ---------- the editor ---------- */
