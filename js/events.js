@@ -178,7 +178,7 @@ const A = {
   // weighing mode: open it (connecting first if needed), leave it, zero, pick the meal
   'wm-open': async () => {
     const cur = S.sheet && S.sheet.type === 'add-food' ? S.sheet : null;
-    const go = () => { const sh = cur || {type: 'add-food', meal: mealForNow(), mode: 'search', q: ''}; Object.assign(sh, {weigh: true, mode: sh.mode === 'quick' ? 'search' : sh.mode, added: []}); Scale.base = 0; S.sheet = sh; render(); };
+    const go = () => { const sh = cur || {type: 'add-food', meal: mealForNow(), mode: 'search', q: ''}; Object.assign(sh, {weigh: true, mode: sh.mode === 'quick' ? 'search' : sh.mode, added: []}); Scale.base = 0; Scale.shownFood = null; Scale.pushNutrition(null); S.sheet = sh; render(); };
     if (Scale.status === 'on') { go(); return; }
     try { if (Scale.status === 'lost' && Scale.dev) await Scale.attach(Scale.dev); else await Scale.connect(); go(); }
     catch (e) { if (e.name !== 'NotFoundError') toast(`Couldn’t connect: ${errText(e)}`); }
@@ -245,7 +245,6 @@ const A = {
   },
   'sc-manual': () => { S.sheet.weigh = false; render(); },
   'sc-tare': () => Scale.tare(),
-  'sc-ntest': d => { setSetting('scaleNutriFmt', d.v); Scale.testNutrition(d.v); },
   'sc-connect': async () => { try { await Scale.connect(); toast(`${Scale.name} connected`); } catch (e) { if (e.name !== 'NotFoundError') toast('Couldn’t connect. Details are under Food scale.'); } },
   'sc-connect-any': async () => { try { await Scale.connect(true); toast(`${Scale.name} connected`); } catch (e) { if (e.name !== 'NotFoundError') toast('Couldn’t connect. Details are under Food scale.'); } },
   'sc-disconnect': () => Scale.disconnect(),

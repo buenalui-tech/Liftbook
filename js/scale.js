@@ -26,8 +26,7 @@ function scaleAmount(g) {
   return {q: Math.max(0, q), unit: u[3], big, label: u[0] === 'lboz' ? 'lb:oz' : u[1].replace(' (milk)', '')};
 }
 const unitPicker = () => `<select class="unit-pick" data-in="sc-unit" aria-label="Units">${SCALE_UNITS.map(u => `<option value="${u[0]}" ${setting('scaleUnit') === u[0] ? 'selected' : ''}>${u[1]}</option>`).join('')}</select>`;
-// the nutrition-on-screen message isn't documented: three likely layouts to try (see the test in Settings)
-const NUTRI_FORMATS = {a: 'Totals for the weight', b: 'Per 100 g', c: 'Totals, reversed byte order'};
+
 function esnPacket(type, payload) {
   const body = [type, payload.length, ...payload], sum = body.reduce((s, b) => (s + b) & 0xff, 0);
   return new Uint8Array([0xfe, 0xef, 0xc0, 0xa2, ...body, sum]);
@@ -55,9 +54,10 @@ const SCALE_DRIVERS = {
     start: () => esnPacket(0xc0, [ESN_CODE[setting('scaleUnit')] ?? 0]),   // the display unit you picked in Liftbook
     unit: u => esnPacket(0xc0, [ESN_CODE[u] ?? 0]),
     tare: () => esnPacket(0xc1, [0x00]),
-    // nutrition on the display: 12 values, each × 10 in 3 bytes (calories, from fat, fat, saturated fat, trans fat,
-    // cholesterol, sodium, potassium, carbs, fiber, sugars, protein). Not yet confirmed on a real scale.
-    nutrition: (v, le) => esnPacket(0xc2, v.flatMap(x => { const n = Math.max(0, Math.min(999999, Math.round((x || 0) * 10))), b = [n >> 16 & 0xff, n >> 8 & 0xff, n & 0xff]; return le ? b.reverse() : b; })),
+    // nutrition on the display, confirmed from a recording of Etekcity's own app: totals for the weight on the scale,
+    // resent as it changes. 12 values, each × 10 in 3 bytes, big-endian: calories, calories from fat, fat, saturated
+    // fat, trans fat, cholesterol (mg), sodium (mg), potassium (mg), carbs, fiber, sugars, protein.
+    nutrition: v => esnPacket(0xc2, v.flatMap(x => { const n = Math.max(0, Math.min(999999, Math.round((x || 0) * 10))); return [n >> 16 & 0xff, n >> 8 & 0xff, n & 0xff]; })),
     parse: esnParse
   },
   // Decent Scale: published at decentespresso.com/decentscale_api. Weight is a signed 16-bit value × 10 in bytes 2–3.
@@ -124,8 +124,13 @@ const Scale = {
     S.profile.scaleName = this.name; store.saveProfile();
     this.changed(true);
   },
-  // with response is the surer way; some browsers only offer one kind, so try each, and remember what happened
+  // with response is the surer way; some browsers only offer one kind, so try each, and remember what happened.
+  // The scale only takes 20 bytes at a time (Etekcity's app splits longer messages the same way).
   async write(bytes, quick) {
+    if (bytes.length > 20) {
+      for (let i = 0; i < bytes.length; i += 20) if (!await this.write(bytes.slice(i, i + 20), quick)) return false;
+      return true;
+    }
     const wr = this.wr; if (!wr) { this.lastWrite = {ok: false, err: 'this scale has no command channel'}; return false; }
     const ways = [quick && wr.writeValueWithoutResponse && (() => wr.writeValueWithoutResponse(bytes)), wr.writeValueWithResponse && (() => wr.writeValueWithResponse(bytes)),
       wr.writeValue && (() => wr.writeValue(bytes)), !quick && wr.writeValueWithoutResponse && (() => wr.writeValueWithoutResponse(bytes))].filter(Boolean);
@@ -145,27 +150,21 @@ const Scale = {
       this.changed(true);
     }, 2500);
   },
-  // a recognizable test: 123.4 calories, 5.6 g fat, 22.2 g carbs, 33.3 g protein, in one of the layouts
-  async testNutrition(fmt) {
-    if (!this.drv || !this.drv.nutrition) return;
-    const v = [123.4, 50.4, 5.6, 1.2, 0, 7.8, 234.5, 345.6, 22.2, 3.3, 4.4, 33.3];
-    const ok = await this.write(this.drv.nutrition(v, fmt === 'c'));
-    this.nutriTest = {fmt, ok, err: ok ? '' : this.lastWrite.err};
-    this.changed(true);
-  },
-  // the food being weighed, shown on the scale's display (beta); at most a few times a second
+  // the food being weighed, on the scale's screen: totals for the grams, resent as they change (a few times a second
+  // at most); no food clears the screen
   pushNutrition(food, grams) {
-    if (!setting('scaleNutrition') || this.demo || !this.drv || !this.drv.nutrition || !food) return;
-    const g = Math.max(0, Math.round(grams || 0));
-    if (g === this.nutriG && food.key === this.nutriKey) return;
+    if (!setting('scaleNutrition') || this.demo || !this.drv || !this.drv.nutrition) return;
+    const g = food ? Math.max(0, Math.round(grams || 0)) : 0, key = food ? food.key : '';
+    if (g === this.nutriG && key === this.nutriKey) return;
     clearTimeout(this.nutriT);
     this.nutriT = setTimeout(() => {
-      this.nutriG = g; this.nutriKey = food.key;
-      const fmt = setting('scaleNutriFmt'), per = fmt === 'b' ? 100 : g;
-      const t = portionTotals(food, per, 'g').totals, m = food.micro || {}, x = food.per100 ? per / 100 : 0;
-      const v = [t.kcal, t.f * 9, t.f, (m.sf || 0) * x, 0, 0, (m.na || 0) * x, (m.k || 0) * x, t.c, t.fiber, 0, t.p];
-      this.write(this.drv.nutrition(v, fmt === 'c')).then(ok => { this.nutriSent = {ok, err: ok ? '' : this.lastWrite.err, at: Date.now()}; });
-    }, 250);
+      this.nutriG = g; this.nutriKey = key;
+      const v = food && food.per100 ? (() => {
+        const t = portionTotals(food, g, 'g').totals, m = food.micro || {}, x = g / 100;
+        return [t.kcal, t.f * 9, t.f, (m.sf || 0) * x, 0, (m.chol || 0) * x, (m.na || 0) * x, (m.k || 0) * x, t.c, t.fiber, (m.sug || 0) * x, t.p];
+      })() : new Array(12).fill(0);
+      this.write(this.drv.nutrition(v), true);
+    }, 150);
   },
   packet(bytes) { for (const r of this.drv.parse(bytes)) this.feed(r); },
   // a reading: steady once it has stayed within 1 g for most of a second (and the scale agrees, when it says)
@@ -306,11 +305,8 @@ function viewScaleSettings() {
     <p class="small muted" style="margin:0">When you add a food, tap <b>Weigh on scale</b> and the grams fill in by themselves. Don’t pair the scale in its own app at the same time; a scale talks to one app at once.</p>
     ${on && !Scale.demo ? `<div class="set-row"><span>Units</span>${unitPicker()}</div>
       ${Scale.unitNote ? `<p class="small muted" style="margin:0">${esc(Scale.unitNote)}</p>` : ''}
-      <label class="set-row"><span class="stack" style="gap:1px"><span>Show nutrition on the scale (beta)</span><span class="small muted">Sends the food you’re weighing to the scale’s screen</span></span>
-        <input type="checkbox" class="switch" data-act="set-toggle" data-v="scaleNutrition" ${setting('scaleNutrition') ? 'checked' : ''}></label>
-      ${setting('scaleNutrition') ? `<div class="stack" style="gap:6px"><p class="small muted" style="margin:0">Find the layout your scale understands: tap A, B and C in turn and watch the scale’s screen. The right one shows <b>123 calories</b> (and 33 g protein if your scale shows it). Using ${esc(NUTRI_FORMATS[setting('scaleNutriFmt')])}.</p>
-        <div class="row" style="gap:6px">${Object.keys(NUTRI_FORMATS).map(k => `<button class="btn grow" data-act="sc-ntest" data-v="${k}" aria-pressed="${setting('scaleNutriFmt') === k}">Test ${k.toUpperCase()}</button>`).join('')}</div>
-        ${Scale.nutriTest ? `<p class="small" style="margin:0">${Scale.nutriTest.ok ? `Sent test ${Scale.nutriTest.fmt.toUpperCase()}; the scale accepted it. If its screen shows 123 calories, that’s the one (it’s now in use).` : `The scale refused test ${Scale.nutriTest.fmt.toUpperCase()}: ${esc(Scale.nutriTest.err)}`}</p>` : ''}</div>` : ''}` : ''}
+      <label class="set-row"><span class="stack" style="gap:1px"><span>Show nutrition on the scale</span><span class="small muted">The scale’s screen shows calories, protein, carbs and fat for what’s on it</span></span>
+        <input type="checkbox" class="switch" data-act="set-toggle" data-v="scaleNutrition" ${setting('scaleNutrition') ? 'checked' : ''}></label>` : ''}
     ${on ? '' : '<button class="btn ghost" data-act="sc-demo-start" style="align-self:flex-start;padding-left:0">Try it with a demo scale</button>'}
     <details ${rec ? 'open' : ''}><summary class="small muted">Scale not connecting or reading wrong?</summary>
       <div class="stack" style="gap:8px;margin-top:8px">
@@ -352,7 +348,10 @@ function weighHeader(sh) {
 }
 // live numbers while weighing (no redraw, so the search box keeps its typing)
 function paintWeighHeader() {
-  const g = Scale.grams(), net = netGrams(), el = id => document.getElementById(id); if (!el('wm-net')) return;
+  const g = Scale.grams(), net = netGrams(), el = id => document.getElementById(id);
+  // the next food going on: clear the last one from the scale's screen
+  if (Scale.shownFood && net != null && Math.abs(net) > 3) { Scale.shownFood = null; Scale.pushNutrition(null); }
+  if (!el('wm-net')) return;
   const a = scaleAmount(net || 0);
   el('wm-net').textContent = net == null ? '—' : a.big; el('wm-u').textContent = a.label;
   el('wm-gross').textContent = Scale.base > 0 && g != null ? `${fmtW(Math.round(g))} g on the scale` : '';
@@ -374,6 +373,7 @@ function weighLog(food) {
     undo = () => { S.food = S.food.filter(x => x.id !== e.id); store.deleteFood(e.id); };
   }
   Scale.base = Scale.grams();   // the next food starts from what's on the scale now
+  Scale.shownFood = {food, grams: item.grams}; Scale.pushNutrition(food, item.grams);   // the scale's screen shows what was just logged
   sh.added = [...(sh.added || []), {name: food.name, label: item.qtyLabel}];
   sh.q = ''; sh.remote = null; sh.remoteQ = null;
   render();

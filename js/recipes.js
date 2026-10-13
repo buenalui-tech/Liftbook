@@ -11,7 +11,7 @@ const scaleNutr = (t, x) => Object.fromEntries(Object.entries(t).map(([k, v]) =>
 // vitamins and minerals of a whole recipe: a nutrient counts once foods reporting it make up half the calories
 function sumMicros(items) {
   const kcal = items.reduce((s, it) => s + ((it.totals && it.totals.kcal) || 0), 0) || 1, out = {};
-  for (const [k] of MICROS) {
+  for (const [k] of [...MICROS, ...MICRO_EXTRA]) {
     if (k === 'fiber') continue;
     let sum = 0, known = 0;
     for (const it of items) { const v = entryMicro(it, k); if (v != null) { sum += v; known += (it.totals && it.totals.kcal) || 0; } }

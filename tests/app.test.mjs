@@ -796,3 +796,16 @@ test('weighing mode: one tap logs each food; a plate and one-at-a-time both work
   T.A['wm-exit']();
   assert.equal(sh.weigh, false);
 });
+
+test('food scale: nutrition on the scale’s screen matches Etekcity’s own app byte for byte, sent in 20-byte pieces', async () => {
+  const T = loadApp();
+  const toHex = b => Array.from(b, x => x.toString(16).padStart(2, '0')).join('');
+  // recorded from VeSync with 80 g of chicken breast on the scale
+  const recorded = 'feefc0a2c22400052800010500001d0000080000' + '000002a800025000080000000000000000000000' + '00f83a';
+  assert.equal(toHex(T.SCALE_DRIVERS.esn00.nutrition([132, 26.1, 2.9, 0.8, 0, 68, 59.2, 204.8, 0, 0, 0, 24.8])), recorded);
+  // and it goes out the way VeSync sends it: 20 + 20 + 3 bytes
+  const sent = [];
+  T.Scale.wr = {writeValueWithoutResponse: async b => { sent.push(b.length); }};
+  assert.equal(await T.Scale.write(T.SCALE_DRIVERS.esn00.nutrition(new Array(12).fill(0)), true), true);
+  assert.equal(sent.join(), '20,20,3');
+});

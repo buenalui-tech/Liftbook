@@ -590,14 +590,16 @@ const MICROS = [
   ['na', 'Sodium', 'mg', 2300, ['307'], 'sodium', 1e3, true],
   ['sf', 'Saturated fat', 'g', 20, ['606'], 'saturated-fat', 1, true]
 ];
+// also kept with each food, for the scale's screen, but not listed on Progress: cholesterol (mg) and sugars (g)
+const MICRO_EXTRA = [['chol', 'Cholesterol', 'mg', 300, ['601'], 'cholesterol', 1e3], ['sug', 'Sugars', 'g', 50, ['269'], 'sugars', 1]];
 // search results carry nutrientNumber/value; the by-id lookup carries number/amount
 function microFromUsda(list) {
   const by = {}; for (const n of list || []) { const num = n.nutrientNumber || n.number, v = n.value ?? n.amount; if (num && v != null) by[num] = +v; }
-  const m = {}; for (const [k, , , , nums] of MICROS) if (nums) { const num = nums.find(x => by[x] != null); if (num) m[k] = by[num]; }
+  const m = {}; for (const [k, , , , nums] of [...MICROS, ...MICRO_EXTRA]) if (nums) { const num = nums.find(x => by[x] != null); if (num) m[k] = by[num]; }
   return m;
 }
 function microFromOff(n) {
-  const m = {}; for (const [k, , , , , off, scale] of MICROS) if (off && n && n[off + '_100g'] != null && !isNaN(+n[off + '_100g'])) m[k] = +n[off + '_100g'] * scale;
+  const m = {}; for (const [k, , , , , off, scale] of [...MICROS, ...MICRO_EXTRA]) if (off && n && n[off + '_100g'] != null && !isNaN(+n[off + '_100g'])) m[k] = +n[off + '_100g'] * scale;
   return m;
 }
 // one logged entry's amount of a nutrient, or null when its food doesn't report it
