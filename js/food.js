@@ -232,6 +232,7 @@ function viewFood() {
     ${day === today ? autoCheckinBanner() : ''}
     ${due ? viewCheckin(due) : ''}
     ${foodDayNav()}
+    ${Scale.supported() || Scale.status === 'on' ? `<button class="btn block weigh-entry" data-act="wm-open">${ICON_SCALE} Weigh food on the scale</button>` : ''}
     <section class="card">
       ${tg ? `<div class="cal-line num" role="group" aria-label="Calories: goal minus food equals remaining">
             <div><b>${fmtNum(tg.kcal)}</b><span>Goal</span></div><i aria-hidden="true">−</i>
@@ -293,9 +294,9 @@ function localMatches(q, meal) {
 }
 function searchResultsHTML(sh) {
   const q = (sh.q || '').trim(), local = localMatches(q, sh.meal), seen = new Set(local.map(e => e.food.key));
-  const meals = q && !sh.into ? S.food.filter(x => x.kind === 'meal' && matchesQuery(x.name, q)) : [];
+  const meals = q && !sh.into && !sh.weigh ? S.food.filter(x => x.kind === 'meal' && matchesQuery(x.name, q)) : [];
   // your own foods: tap to choose an amount, or + to add last time's amount right away
-  const own = (e, i, note) => sh.into || !e.last ? foodResult(e.food, i, note)
+  const own = (e, i, note) => sh.into || sh.weigh || !e.last ? foodResult(e.food, i, note)
     : `<div class="lib-row">${foodResult(e.food, i, note)}<button class="quick-plus" data-act="food-relog" data-v="${i}" aria-label="Add ${esc(e.food.name)}, ${esc(e.last.qtyLabel || 'same amount')}">+</button></div>`;
   sh.local = local;
   const remote = q.length >= 2 && sh.remoteQ === q ? (sh.remote || []).filter(f => !seen.has(f.key)) : [];
@@ -324,13 +325,14 @@ function paintSearch() {
 }
 function viewAddFood() {
   const sh = S.sheet, mode = sh.mode === 'recent' ? 'search' : sh.mode || 'search';
-  const tabs = [['search', 'Search'], ['mine', 'Mine'], ['quick', 'Quick add']];
+  const tabs = sh.weigh ? [['search', 'Search'], ['mine', 'Mine']] : [['search', 'Search'], ['mine', 'Mine'], ['quick', 'Quick add']];
+  const canWeigh = !sh.weigh && (Scale.supported() || Scale.status === 'on');
   let body = '';
   if (mode === 'search') {
     body = `<div class="row" style="gap:8px"><span class="search-wrap grow"><input id="food-q" data-in="food-q" type="search" class="search" value="${esc(sh.q || '')}" placeholder="${SpeechRec ? 'Search or tap the mic' : 'Search foods, e.g. greek yogurt'}"
         autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" enterkeyhint="search">
         ${SpeechRec ? `<button id="food-mic" class="mic ${sh.listening ? 'on' : ''}" data-act="food-mic" aria-label="Say a food, like 150 grams of chicken breast" aria-pressed="${!!sh.listening}">${ICON_MIC}</button>` : ''}</span>
-        <button class="btn" data-act="barcode-open" aria-label="Scan a barcode">${BARCODE_ICON} Scan</button></div>
+        <button class="btn" data-act="barcode-open" aria-label="Scan a barcode">${BARCODE_ICON}${sh.weigh ? '' : ' Scan'}</button>${canWeigh ? `<button class="btn" data-act="wm-open" aria-label="Weigh on the scale">${ICON_SCALE}</button>` : ''}</div>
       <div class="stack" id="food-results" style="gap:10px">${searchResultsHTML(sh)}</div>`;
   } else if (mode === 'mine') {
     // My meals, My recipes, My foods: tap to log, Edit to change; everything is edited in place
@@ -340,7 +342,7 @@ function viewAddFood() {
     const row = (act, v, name, sub, badge, editAct, editV = v) => `<div class="lib-row"><button data-act="${act}" data-v="${esc(v)}"><span class="stack" style="gap:1px;min-width:0;text-align:left"><span class="fname">${esc(name)}</span><span class="small muted">${esc(sub)}</span></span><span class="src ${badge.toLowerCase()}">${badge}</span></button>
       <button class="edit-link" data-act="${editAct}" data-v="${esc(editV)}" aria-label="Edit ${esc(name)}">Edit</button></div>`;
     const section = (title, list, add) => `<div class="row between"><p class="eyebrow" style="margin:0">${title}</p>${add}</div>${list || ''}`;
-    body = `${sh.into ? '' : section('My meals', meals.length ? `<div class="lib">${meals.map(m => row('saved-meal-log', m.id, m.name, `${m.items.length} foods · ${fmtNum(mealKcal(m))} kcal`, 'Meal', 'meal-edit')).join('')}</div>` : '<p class="small muted" style="margin:0">Foods you often have together, added in one tap.</p>', '<button class="btn ghost small-btn" data-act="meal-new">+ New</button>')}
+    body = `${sh.into || sh.weigh ? '' : section('My meals', meals.length ? `<div class="lib">${meals.map(m => row('saved-meal-log', m.id, m.name, `${m.items.length} foods · ${fmtNum(mealKcal(m))} kcal`, 'Meal', 'meal-edit')).join('')}</div>` : '<p class="small muted" style="margin:0">Foods you often have together, added in one tap.</p>', '<button class="btn ghost small-btn" data-act="meal-new">+ New</button>')}
       ${section('My recipes', recipes.length ? `<div class="lib">${recipes.map((r, i) => { const f = sh.results[i], k = f.per100 ? f.per100.kcal * (f.servings[0].grams || 100) / 100 : f.perServing.kcal;
         return row('food-pick', i, r.name, `${fmtW(r.servings)} servings · ${fmtNum(k)} kcal each`, 'Recipe', 'recipe-edit', r.id); }).join('')}</div>`
         : '<p class="small muted" style="margin:0">Cook once, log a serving or weigh your bowl. Easy to change when the recipe does.</p>', '<button class="btn ghost small-btn" data-act="recipe-new">+ New</button>')}
@@ -353,8 +355,10 @@ function viewAddFood() {
         <label class="field">Carbs (g)<input id="qa-c" inputmode="decimal"></label><label class="field">Fat (g)<input id="qa-f" inputmode="decimal"></label></div>
       <button class="btn primary block" data-act="quick-save">Add to ${esc(mealLabel(sh.meal))}</button>`;
   }
-  return `<div class="row between"><h2>${sh.into ? `Add to ${esc(sh.into.draft.name || (sh.into.kind === 'recipe' ? 'recipe' : 'meal'))}` : `Add to ${esc(mealLabel(sh.meal))}`}</h2><button class="iconbtn" data-act="${sh.into ? 'into-back' : 'sheet-close'}" aria-label="${sh.into ? 'Back' : 'Close'}">✕</button></div>
-    ${sh.plate ? `<div class="banner small">${ICON_SCALE} Scale zeroed. Put the next food on the plate and pick it below, or close when you’re done.</div>` : ''}
+  const target = sh.into ? esc(sh.into.draft.name || (sh.into.kind === 'recipe' ? 'recipe' : 'meal')) : esc(mealLabel(sh.meal));
+  return `<div class="row between"><h2>${sh.weigh ? `Weigh into ${target}` : `Add to ${target}`}</h2><span class="row" style="gap:4px">${sh.weigh ? '<button class="btn" data-act="wm-exit">Done</button>' : ''}<button class="iconbtn" data-act="${sh.into ? 'into-back' : 'sheet-close'}" aria-label="${sh.into ? 'Back' : 'Close'}">✕</button></span></div>
+    ${sh.weigh && !sh.into ? `<div class="chips" role="group" aria-label="Meal">${MEALS.map(([m, l]) => `<button class="chipbtn" data-act="wm-meal" data-v="${m}" aria-pressed="${sh.meal === m}">${l}</button>`).join('')}</div>` : ''}
+    ${sh.weigh && Scale.status === 'on' ? weighHeader(sh) : sh.weigh ? `<button class="btn block" data-act="wm-open">${ICON_SCALE} Scale disconnected · Reconnect</button>` : ''}
     <div class="seg tabs3" role="tablist">${tabs.map(([k, l]) => `<button data-act="food-mode" data-v="${k}" aria-pressed="${mode === k}">${l}</button>`).join('')}</div>
     ${body}`;
 }
@@ -517,7 +521,7 @@ async function onBarcode(code) {
   const food = await lookupBarcode(code);
   if (S.sheet !== sh) return;
   sh.looking = false;
-  if (food) { S.sheet = {type: 'add-food', meal: sh.meal, mode: 'search', into: sh.into}; openPortion(food, sh.meal); }
+  if (food) { S.sheet = sh.back || {type: 'add-food', meal: sh.meal, mode: 'search', into: sh.into}; if (S.sheet.weigh) weighLog(food); else openPortion(food, sh.meal); }
   else { sh.notFound = code; render(); }
 }
 

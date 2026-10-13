@@ -174,7 +174,18 @@ const A = {
   'ex-note': d => { S.noteOpen = {...(S.noteOpen || {}), [d.e]: !(S.noteOpen && S.noteOpen[d.e])}; render(); const t = document.getElementById('note-' + d.e); if (t) t.focus(); },
   'food-add': d => { S.sheet = {type: 'add-food', meal: d.v, mode: 'search', q: ''}; render(); const i = document.getElementById('food-q'); if (i) i.focus(); },
   'food-mode': d => { S.sheet.mode = d.v; render(); },
-  'food-pick': d => { const sh = S.sheet, f = sh.results && sh.results[+d.v]; if (!f) return; if ((sh.q || '').trim() && (sh.remote || []).includes(f)) rememberSearch(sh.q); openPortion(f, sh.meal); },
+  'food-pick': d => { const sh = S.sheet, f = sh.results && sh.results[+d.v]; if (!f) return; if ((sh.q || '').trim() && (sh.remote || []).includes(f)) rememberSearch(sh.q); if (sh.weigh) weighLog(f); else openPortion(f, sh.meal); },
+  // weighing mode: open it (connecting first if needed), leave it, zero, pick the meal
+  'wm-open': async () => {
+    const cur = S.sheet && S.sheet.type === 'add-food' ? S.sheet : null;
+    const go = () => { const sh = cur || {type: 'add-food', meal: mealForNow(), mode: 'search', q: ''}; Object.assign(sh, {weigh: true, mode: sh.mode === 'quick' ? 'search' : sh.mode, added: []}); Scale.base = 0; S.sheet = sh; render(); };
+    if (Scale.status === 'on') { go(); return; }
+    try { if (Scale.status === 'lost' && Scale.dev) await Scale.attach(Scale.dev); else await Scale.connect(); go(); }
+    catch (e) { if (e.name !== 'NotFoundError') toast(`Couldn’t connect: ${errText(e)}`); }
+  },
+  'wm-exit': () => { S.sheet.weigh = false; Scale.base = 0; render(); },
+  'wm-zero': () => { Scale.base = 0; Scale.tare(); },
+  'wm-meal': d => { S.sheet.meal = d.v; render(); },
   'food-q-pick': d => { const i = document.getElementById('food-q'); if (i) i.value = d.v; onFoodQuery(d.v); },
   'food-edit': d => { const e = S.food.find(x => x.id === d.v); if (e) { S.sheet = null; openPortion(e.food, e.meal, e); } },
   'portion-back': () => { S.sheet = S.sheet.back || null; render(); },
@@ -182,8 +193,9 @@ const A = {
   'portion-save': () => savePortion(),
   'portion-save-next': () => {
     const meal = S.sheet.meal, into = S.sheet.back && S.sheet.back.into;
+    const g = Scale.grams();
     if (!savePortion()) return;   // didn't save (no amount)
-    Scale.tare(); S.sheet = {type: 'add-food', meal, mode: 'search', q: '', plate: true, into}; render();
+    S.sheet = {type: 'add-food', meal, mode: 'search', q: '', weigh: true, into, added: []}; Scale.base = g || 0; render();
   },
   // fast logging, voice, label fixes
   'food-relog': d => { const sh = S.sheet, e = sh.local && sh.local[+d.v]; if (e && e.last) relogLast(e, sh.meal); },
@@ -246,8 +258,8 @@ const A = {
   'quick-save': () => saveQuickAdd(),
   'custom-new': d => { S.sheet = {type: 'custom-food', meal: (S.sheet && S.sheet.meal) || 'snack', barcode: d.v || '', into: S.sheet && S.sheet.into}; render(); },
   'custom-save': () => saveCustomFood(),
-  'barcode-open': () => { S.sheet = {type: 'barcode', meal: S.sheet.meal, into: S.sheet.into}; render(); },
-  'barcode-close': () => { Scanner.stop(); S.sheet = {type: 'add-food', meal: S.sheet.meal, mode: 'search', into: S.sheet.into}; render(); },
+  'barcode-open': () => { S.sheet = {type: 'barcode', meal: S.sheet.meal, into: S.sheet.into, back: S.sheet}; render(); },
+  'barcode-close': () => { Scanner.stop(); S.sheet = S.sheet.back || {type: 'add-food', meal: S.sheet.meal, mode: 'search', into: S.sheet.into}; render(); },
   'barcode-type': () => onBarcode((document.getElementById('scan-code') || {}).value || ''),
   'targets-open': () => { S.sheet = {type: 'targets'}; render(); },
   'tg-kmode': d => { const dr = S.sheet.draft; dr.kcalMode = d.v; if (d.v === 'manual' && !dr.kcal) { const a = autoCalories(); dr.kcal = a ? a.kcal : 2200; } render(); },

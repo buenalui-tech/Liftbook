@@ -28,7 +28,7 @@ function loadApp(stored = {}, extra = {}) {
   vm.createContext(ctx);
   // top-level const/let live in the context's script scope; expose the names tests need
   const src = FILES.map(f => fs.readFileSync(new URL(`../js/${f}.js`, import.meta.url), 'utf8')).join('\n;\n') +
-    '\n;globalThis.T = {S, store, suggest, e1rm, niceTicks, weightSeries, weeklyRateKg, caloriesFor, improvements, recomputePRs, muscleLoad, musclesFor, tagFor, lastPerf, scanKg, conv, TEMPLATE, CATALOG, slug, startOfDay, fromUsda, fromOff, rankFoods, unitsFor, portionTotals, autoTargets, dayTotals, estimateBurn, targets, targetsFromBurn, computeTargets, nutritionPrefs, proposeTargets, applyCheckin, runAutoCheckin, checkinDue, copyMeal, foodLogs, viewToday, viewFood, viewProgress, viewBody, viewProgram, viewSheet, viewWorkout, startWorkout, viewSettings, buildPhases, Timer, viewTimer, viewTimerSetup, viewMobilitySetup, MOBILITY, viewTrainingLoad, sessionLoad, specFromVals, specToSheet, cleanSpec, specSecs, finishWorkout, timerOutline, viewTimerSetup, microFromUsda, microFromOff, entryMicro, viewMicros, Micro, fromUsda, portionMicros, Scale, esnParse, esnPacket, SCALE_DRIVERS, scaleAmount, openPortion, viewPortion, A, viewSettings, matchesQuery, localMatches, searchResultsHTML, onFoodQuery, rememberSearch, searchCache, viewAddFood, ytId, formVideo, FORM_VIDEOS, viewHowto, holdForVideo, playBtn, openCollection, saveCollection, recipeAsFood, setItemAmount, parseSpoken, applySpoken, lookupBarcode, relogLast, savePortion, viewCollection, TEMPLATE_COPY: () => JSON.parse(JSON.stringify(TEMPLATE))};';
+    '\n;globalThis.T = {S, store, suggest, e1rm, niceTicks, weightSeries, weeklyRateKg, caloriesFor, improvements, recomputePRs, muscleLoad, musclesFor, tagFor, lastPerf, scanKg, conv, TEMPLATE, CATALOG, slug, startOfDay, fromUsda, fromOff, rankFoods, unitsFor, portionTotals, autoTargets, dayTotals, estimateBurn, targets, targetsFromBurn, computeTargets, nutritionPrefs, proposeTargets, applyCheckin, runAutoCheckin, checkinDue, copyMeal, foodLogs, viewToday, viewFood, viewProgress, viewBody, viewProgram, viewSheet, viewWorkout, startWorkout, viewSettings, buildPhases, Timer, viewTimer, viewTimerSetup, viewMobilitySetup, MOBILITY, viewTrainingLoad, sessionLoad, specFromVals, specToSheet, cleanSpec, specSecs, finishWorkout, timerOutline, viewTimerSetup, microFromUsda, microFromOff, entryMicro, viewMicros, Micro, fromUsda, portionMicros, Scale, esnParse, esnPacket, SCALE_DRIVERS, scaleAmount, weighLog, openPortion, viewPortion, A, viewSettings, matchesQuery, localMatches, searchResultsHTML, onFoodQuery, rememberSearch, searchCache, viewAddFood, ytId, formVideo, FORM_VIDEOS, viewHowto, holdForVideo, playBtn, openCollection, saveCollection, recipeAsFood, setItemAmount, parseSpoken, applySpoken, lookupBarcode, relogLast, savePortion, viewCollection, TEMPLATE_COPY: () => JSON.parse(JSON.stringify(TEMPLATE))};';
   vm.runInContext(src, ctx, {filename: 'liftbook.js'});
   return ctx.T;
 }
@@ -540,11 +540,13 @@ test('food scale: Etekcity packets, live grams into the portion, zero, and weigh
   T.A['portion-save-next']();
   const logged = T.S.food.find(x => x.kind === 'log');
   assert.equal(logged.grams, 152); assert.equal(Math.round(logged.totals.kcal), 251);
-  assert.equal(T.S.sheet.type, 'add-food'); assert.equal(T.S.sheet.plate, true);
-  assert.equal(T.Scale.grams(), 0, 'zeroed for the next food');
-  T.Scale.feed({grams: 152.4 + 180, stable: true});
-  T.openPortion({...chicken, key: 'usda:2', name: 'Rice', per100: {kcal: 130, p: 2.7, c: 28, f: 0.3, fiber: 0.4}}, 'dinner');
-  assert.equal(T.S.sheet.weigh, true); assert.equal(T.S.sheet.qty, 180, 'only the new food counts');
+  assert.equal(T.S.sheet.type, 'add-food'); assert.equal(T.S.sheet.weigh, true, 'carries on in weighing mode');
+  // rice goes on top of the chicken: tapping it logs only the rice
+  for (let i = 0; i < 4; i++) T.Scale.feed({grams: 152.4 + 180, stable: true});
+  T.weighLog({...chicken, key: 'usda:2', name: 'Rice', per100: {kcal: 130, p: 2.7, c: 28, f: 0.3, fiber: 0.4}});
+  const rice = T.S.food.find(x => x.food && x.food.name === 'Rice');
+  assert.equal(rice.grams, 180, 'only the new food counts');
+  assert.equal(T.S.sheet.type, 'add-food', 'still weighing, ready for the next food');
   T.Scale.disconnect();
   assert.equal(T.Scale.status, 'off');
 });
@@ -766,4 +768,31 @@ test('food scale: every display unit can be picked, and the amount logs in that 
   const chicken = {name: 'Milk, 2%', per100: {kcal: 50, p: 3.3, c: 4.8, f: 2, fiber: 0}, servings: []};
   assert.ok(T.unitsFor(chicken).some(u => u.id === 'ml') && T.unitsFor(chicken).some(u => u.id === 'floz'));
   assert.equal(T.portionTotals(chicken, 250, 'ml').totals.kcal, 125);
+});
+
+test('weighing mode: one tap logs each food; a plate and one-at-a-time both work', () => {
+  // a clock the test moves forward, so readings can settle the way they do on a real scale
+  let now = Date.UTC(2026, 9, 12, 12);
+  class Clock extends Date { constructor(...a) { super(...(a.length ? a : [now])); } static now() { return now; } }
+  const T = loadApp({}, {Date: Clock});
+  const food = (n, k) => ({key: 'usda:' + n, source: 'usda', sourceId: n, name: n, per100: {kcal: k, p: 10, c: 10, f: 1, fiber: 0}, servings: []});
+  T.Scale.startDemo();
+  T.A['wm-open']();
+  const sh = T.S.sheet;
+  assert.equal(sh.type, 'add-food'); assert.equal(sh.weigh, true);
+  assert.ok(T.viewSheet().includes('Weigh into') && T.viewSheet().includes('wm-net'));
+  const put = g => { for (let i = 0; i < 8; i++) { now += 150; T.Scale.feed({grams: g, stable: true}); } };
+  // a plate: chicken, then rice on top
+  put(150); T.weighLog(food('Chicken', 165));
+  put(330); T.weighLog(food('Rice', 130));
+  // one at a time: take everything off, put an apple on
+  put(0); put(120); T.weighLog(food('Apple', 52));
+  const g = n => T.S.food.find(x => x.food && x.food.name === n).grams;
+  assert.equal(`${g('Chicken')} ${g('Rice')} ${g('Apple')}`, '150 180 120');
+  assert.equal(sh.added.length, 3);
+  // undo puts the scale's starting point back too
+  T.A.undo();
+  assert.ok(!T.S.food.some(x => x.food && x.food.name === 'Apple'));
+  T.A['wm-exit']();
+  assert.equal(sh.weigh, false);
 });

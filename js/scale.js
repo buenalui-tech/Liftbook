@@ -178,6 +178,7 @@ const Scale = {
     this.raw = r.grams; this.hist.push([now, r.grams]); this.hist = this.hist.filter(h => now - h[0] < 900);
     const vals = this.hist.map(h => h[1]), span = Math.max(...vals) - Math.min(...vals);
     this.stable = r.stable !== false && this.hist.length >= 3 && span <= 1 && now - this.hist[0][0] >= 500;
+    if (this.stable && this.base > 0 && this.grams() < this.base - 2) this.base = Math.max(0, this.grams());
     this.changed(false);
   },
   async tare() {
@@ -252,6 +253,7 @@ const Scale = {
     const shows = el('sc-shows'); if (shows && this.display && !this.demo) shows.textContent = `Scale shows ${this.display}`;
     if (st) { st.textContent = g == null ? 'Waiting for the scale…' : this.stable ? 'Steady' : 'Settling…'; st.className = 'small ' + (this.stable ? 'sc-steady' : 'muted'); }
     const sh = S.sheet;
+    if (sh && sh.type === 'add-food' && sh.weigh) paintWeighHeader();
     if (sh && sh.type === 'portion' && sh.weigh && g != null) {
       const u = amt.unit, q = amt.q;
       this.pushNutrition(sh.food, g);
@@ -328,4 +330,52 @@ async function sendRecording() {
   for (const [i, p] of parts.entries()) sent = await Outbox.add('feedback', {kind: 'scale', message: `Scale recording ${i + 1}/${parts.length} (${rec.name})\n${p}`, email: Sync.user ? Sync.user.email : null, screen: 'settings', app_version: APP_VERSION, device: device()}) && sent;
   Scale.stopRecording(); Scale.rec = null; render();
   toast(sent ? 'Recording sent. Thank you!' : 'Saved. It’ll send when you’re back online.');
+}
+
+/* ---------- weighing mode: stay on the scale, tap foods one after another ----------
+   The add-food sheet with the live weight pinned on top. Tapping a food logs it with the weight of what was just
+   added, then the next food starts from there. A plate built up on the scale and foods weighed one at a time both
+   work: Scale.base is the weight already logged, and it drops to whatever is left when something is taken off. */
+const mealForNow = () => { const h = new Date().getHours() + new Date().getMinutes() / 60; return h < 10.5 ? 'breakfast' : h < 15 ? 'lunch' : h < 21 ? 'dinner' : 'snack'; };
+const netGrams = () => { const g = Scale.grams(); return g == null ? null : g - (Scale.base || 0); };
+function weighHeader(sh) {
+  const g = Scale.grams(), net = netGrams(), a = scaleAmount(net || 0);
+  const added = (sh.added || []).slice(-3);
+  return `<div class="weigh wm">
+    <div class="row between"><span class="small muted row" style="gap:6px"><i class="sc-dot"></i>${esc(Scale.name)}</span><span id="wm-st" class="small ${Scale.stable ? 'sc-steady' : 'muted'}">${g == null ? 'Waiting for the scale…' : Scale.stable ? 'Steady' : 'Settling…'}</span></div>
+    <div class="wm-main"><div class="stack" style="gap:2px"><div class="weigh-g num"><span id="wm-net">${net == null ? '—' : a.big}</span><small id="wm-u">${a.label}</small></div>
+        <span class="small muted num" id="wm-gross">${Scale.base > 0 && g != null ? `${fmtW(Math.round(g))} g on the scale` : ''}</span></div>
+      <div class="stack" style="gap:6px;align-items:stretch">${unitPicker()}<button class="btn" data-act="wm-zero">Zero</button></div></div>
+    ${Scale.demo ? `<label class="small muted">Demo: slide to put food on the scale<input type="range" id="sc-demo" data-in="sc-demo" min="0" max="900" step="1" value="${Scale.demoG}"></label>` : ''}
+    <p class="small muted" style="margin:0">${added.length ? `Added: ${added.map(x => `${esc(x.name)} ${esc(x.label)}`).join(' · ')}` : 'Put food on the scale, then tap it below: it’s logged with this weight. Using a plate or bowl? Put it on first and tap Zero.'}</p>
+  </div>`;
+}
+// live numbers while weighing (no redraw, so the search box keeps its typing)
+function paintWeighHeader() {
+  const g = Scale.grams(), net = netGrams(), el = id => document.getElementById(id); if (!el('wm-net')) return;
+  const a = scaleAmount(net || 0);
+  el('wm-net').textContent = net == null ? '—' : a.big; el('wm-u').textContent = a.label;
+  el('wm-gross').textContent = Scale.base > 0 && g != null ? `${fmtW(Math.round(g))} g on the scale` : '';
+  const st = el('wm-st'); st.textContent = g == null ? 'Waiting for the scale…' : Scale.stable ? 'Steady' : 'Settling…'; st.className = 'small ' + (Scale.stable ? 'sc-steady' : 'muted');
+}
+function weighLog(food) {
+  const sh = S.sheet, net = netGrams();
+  if (!food.per100) { openPortion(food, sh.meal); return; }   // a food known only by the serving can't be weighed
+  if (!(net >= 1)) { toast('Put the food on the scale first.'); return; }
+  const a = scaleAmount(net), item = itemFromPortion(food, a.q, a.unit), prevBase = Scale.base || 0;
+  let undo;
+  if (sh.into) {
+    sh.into.draft.items.push(item); const it = item;
+    undo = () => { sh.into.draft.items = sh.into.draft.items.filter(x => x !== it); };
+  } else {
+    const day = S.day || startOfDay(Date.now());
+    const e = {id: newId(), kind: 'log', date: day === startOfDay(Date.now()) ? Date.now() : day + 12 * 3600000, meal: sh.meal, ...item};
+    S.food.push(e); store.saveFood(e);
+    undo = () => { S.food = S.food.filter(x => x.id !== e.id); store.deleteFood(e.id); };
+  }
+  Scale.base = Scale.grams();   // the next food starts from what's on the scale now
+  sh.added = [...(sh.added || []), {name: food.name, label: item.qtyLabel}];
+  sh.q = ''; sh.remote = null; sh.remoteQ = null;
+  render();
+  toastUndo(`${food.name} · ${item.qtyLabel} added`, () => { undo(); Scale.base = prevBase; sh.added = sh.added.slice(0, -1); render(); });
 }
