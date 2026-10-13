@@ -356,11 +356,12 @@ function viewAddFood() {
       <button class="btn primary block" data-act="quick-save">Add to ${esc(mealLabel(sh.meal))}</button>`;
   }
   const target = sh.into ? esc(sh.into.draft.name || (sh.into.kind === 'recipe' ? 'recipe' : 'meal')) : esc(mealLabel(sh.meal));
-  return `<div class="row between"><h2>${sh.weigh ? `Weigh into ${target}` : `Add to ${target}`}</h2><span class="row" style="gap:4px">${sh.weigh ? '<button class="btn" data-act="wm-exit">Done</button>' : ''}<button class="iconbtn" data-act="${sh.into ? 'into-back' : 'sheet-close'}" aria-label="${sh.into ? 'Back' : 'Close'}">✕</button></span></div>
+  return `<div class="row between"><h2>${sh.weigh ? `Weigh into ${target}` : `Add to ${target}`}</h2><button class="iconbtn" data-act="${sh.into ? 'into-back' : 'sheet-close'}" aria-label="${sh.into ? 'Back' : 'Close'}">✕</button></div>
     ${sh.weigh && !sh.into ? `<div class="chips" role="group" aria-label="Meal">${MEALS.map(([m, l]) => `<button class="chipbtn" data-act="wm-meal" data-v="${m}" aria-pressed="${sh.meal === m}">${l}</button>`).join('')}</div>` : ''}
-    ${sh.weigh && Scale.status === 'on' ? weighHeader(sh) : sh.weigh ? `<button class="btn block" data-act="wm-open">${ICON_SCALE} Scale disconnected · Reconnect</button>` : ''}
+    ${sh.weigh && Scale.status === 'on' ? weighHeader(sh) : sh.weigh ? `<button class="btn primary block" data-act="wm-open">${ICON_SCALE} ${Scale.status === 'connecting' ? 'Connecting to the scale…' : 'Connect the scale'}</button>` : ''}
     <div class="seg tabs3" role="tablist">${tabs.map(([k, l]) => `<button data-act="food-mode" data-v="${k}" aria-pressed="${mode === k}">${l}</button>`).join('')}</div>
-    ${body}`;
+    ${body}
+    ${sh.weigh ? '<button class="btn ghost" data-act="wm-exit" style="align-self:center">Add without the scale</button>' : ''}`;
 }
 const mealLabel = m => (MEALS.find(x => x[0] === m) || [, 'Snacks'])[1];
 const BARCODE_ICON = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M3 7V4h3M21 7V4h-3M3 17v3h3M21 17v3h-3M7 8v8M10 8v8M13 8v8M17 8v8"/></svg>';
@@ -521,7 +522,7 @@ async function onBarcode(code) {
   const food = await lookupBarcode(code);
   if (S.sheet !== sh) return;
   sh.looking = false;
-  if (food) { S.sheet = sh.back || {type: 'add-food', meal: sh.meal, mode: 'search', into: sh.into}; if (S.sheet.weigh) weighLog(food); else openPortion(food, sh.meal); }
+  if (food) { S.sheet = sh.back || {type: 'add-food', meal: sh.meal, mode: 'search', into: sh.into}; if (S.sheet.weigh) pickForScale(food); else openPortion(food, sh.meal); }
   else { sh.notFound = code; render(); }
 }
 

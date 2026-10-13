@@ -477,5 +477,16 @@ textarea.note-in{width:100%;border:1px solid var(--line);border-radius:8px;backg
 .wm-main{display:flex;justify-content:space-between;align-items:center;gap:12px}
 .wm .weigh-g{text-align:left;font-size:56px}
 .weigh-entry svg{width:20px;height:20px}
+/* the scale screen */
+.sheet.full{max-height:100%;height:100%;border-radius:0;padding-top:calc(14px + env(safe-area-inset-top,0px))}
+.wm-food{display:flex;align-items:baseline;justify-content:space-between;gap:8px;min-height:22px}
+.wm-food b{font-size:17px}
+.wm-nut{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;text-align:center}
+.wm-nut div{display:flex;flex-direction:column;background:var(--surface);border-radius:10px;padding:8px 4px}
+.wm-nut b{font-family:var(--display);font-size:22px;line-height:1.1}
+.wm-nut span{font-size:12px;color:var(--muted);font-weight:600}
+.wm-log{display:flex;flex-direction:column;gap:2px;border:1px solid var(--line);border-radius:12px;padding:10px 12px}
+.wm-item{display:flex;align-items:center;gap:8px;border-top:1px solid var(--line);min-height:40px}
+.wm-item:first-of-type{border-top:0}
 .toast{position:fixed;left:50%;transform:translateX(-50%);top:calc(12px + env(safe-area-inset-top,0px));z-index:20;background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:10px;font-weight:600;font-size:14px;max-width:calc(100% - 32px)}
 @media (prefers-reduced-motion: no-preference){.set.done{transition:background .2s}.rest .fill{transition:width .25s linear}}

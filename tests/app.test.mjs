@@ -809,3 +809,32 @@ test('food scale: nutrition on the scale’s screen matches Etekcity’s own app
   assert.equal(await T.Scale.write(T.SCALE_DRIVERS.esn00.nutrition(new Array(12).fill(0)), true), true);
   assert.equal(sent.join(), '20,20,3');
 });
+
+test('scale screen: + Add food opens on the scale; pick a food, weigh it live, Log, and the list keeps everything', () => {
+  let now = Date.UTC(2026, 9, 12, 12);
+  class Clock extends Date { constructor(...a) { super(...(a.length ? a : [now])); } static now() { return now; } }
+  const T = loadApp({}, {Date: Clock});
+  const food = (n, k) => ({key: 'usda:' + n, source: 'usda', sourceId: n, name: n, per100: {kcal: k, p: 30, c: 0, f: 3, fiber: 0}, servings: []});
+  T.Scale.startDemo();
+  T.A['food-add']({v: 'lunch'});
+  const sh = T.S.sheet;
+  assert.equal(sh.weigh, true, 'straight to the scale');
+  const put = g => { for (let i = 0; i < 8; i++) { now += 150; T.Scale.feed({grams: g, stable: true}); } };
+  sh.results = [food('Chicken', 165), food('Rice', 130)];
+  T.A['food-pick']({v: 0});
+  assert.equal(sh.pick.name, 'Chicken');
+  let html = T.viewSheet();
+  assert.ok(html.includes('Put it on the scale'), 'Log waits for food on the scale');
+  put(200);
+  html = T.viewSheet();
+  assert.ok(html.includes('Log 200 g') && html.includes('330'), 'live calories for the weight');
+  T.A['wm-log']();
+  assert.equal(sh.pick, null); assert.equal(sh.weigh, true, 'still on the scale for the next food');
+  assert.ok(T.viewSheet().includes('Lunch so far'));
+  // remove it from the list, then undo
+  const id = T.S.food.find(x => x.kind === 'log').id;
+  T.A['wm-rm']({v: id});
+  assert.ok(!T.S.food.some(x => x.id === id));
+  T.A.undo();
+  assert.ok(T.S.food.some(x => x.id === id));
+});

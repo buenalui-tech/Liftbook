@@ -172,9 +172,23 @@ const A = {
   },
   'set-toggle': d => { setSetting(d.v, !setting(d.v)); render(); },
   'ex-note': d => { S.noteOpen = {...(S.noteOpen || {}), [d.e]: !(S.noteOpen && S.noteOpen[d.e])}; render(); const t = document.getElementById('note-' + d.e); if (t) t.focus(); },
-  'food-add': d => { S.sheet = {type: 'add-food', meal: d.v, mode: 'search', q: ''}; render(); const i = document.getElementById('food-q'); if (i) i.focus(); },
+  'food-add': d => {
+    const useScale = Scale.status === 'on' || (S.profile.scaleName && Scale.supported() && setting('scaleFirst'));
+    S.sheet = {type: 'add-food', meal: d.v, mode: 'search', q: '', weigh: !!useScale, added: []};
+    if (useScale) { Scale.base = 0; Scale.shownFood = null; Scale.pushNutrition(null); if (Scale.status === 'off') Scale.autoConnect(); }
+    render(); if (!useScale) { const i = document.getElementById('food-q'); if (i) i.focus(); }
+  },
   'food-mode': d => { S.sheet.mode = d.v; render(); },
-  'food-pick': d => { const sh = S.sheet, f = sh.results && sh.results[+d.v]; if (!f) return; if ((sh.q || '').trim() && (sh.remote || []).includes(f)) rememberSearch(sh.q); if (sh.weigh) weighLog(f); else openPortion(f, sh.meal); },
+  'food-pick': d => { const sh = S.sheet, f = sh.results && sh.results[+d.v]; if (!f) return; if ((sh.q || '').trim() && (sh.remote || []).includes(f)) rememberSearch(sh.q); if (sh.weigh) pickForScale(f); else openPortion(f, sh.meal); },
+  'wm-log': () => { const sh = S.sheet; if (sh.pick) weighLog(sh.pick); },
+  'wm-unpick': () => { S.sheet.pick = null; Scale.pushNutrition(null); render(); },
+  'wm-rm': d => {
+    const sh = S.sheet;
+    if (sh.into) { sh.into.draft.items.splice(+d.v.slice(1), 1); render(); return; }
+    const e = S.food.find(x => x.id === d.v); if (!e) return;
+    S.food = S.food.filter(x => x.id !== e.id); store.deleteFood(e.id); render();
+    toastUndo(`${e.food.name} removed`, () => { S.food.push(e); store.saveFood(e); render(); });
+  },
   // weighing mode: open it (connecting first if needed), leave it, zero, pick the meal
   'wm-open': async () => {
     const cur = S.sheet && S.sheet.type === 'add-food' ? S.sheet : null;
@@ -183,7 +197,7 @@ const A = {
     try { if (Scale.status === 'lost' && Scale.dev) await Scale.attach(Scale.dev); else await Scale.connect(); go(); }
     catch (e) { if (e.name !== 'NotFoundError') toast(`Couldn’t connect: ${errText(e)}`); }
   },
-  'wm-exit': () => { S.sheet.weigh = false; Scale.base = 0; render(); },
+  'wm-exit': () => { S.sheet.weigh = false; S.sheet.pick = null; Scale.base = 0; Scale.pushNutrition(null); render(); },
   'wm-zero': () => { Scale.base = 0; Scale.tare(); },
   'wm-meal': d => { S.sheet.meal = d.v; render(); },
   'food-q-pick': d => { const i = document.getElementById('food-q'); if (i) i.value = d.v; onFoodQuery(d.v); },
@@ -548,6 +562,9 @@ async function importFile(file) {
   try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch {}
   await Sync.init(); render();
   Outbox.flush();
+  // the scale used before reconnects by itself where the browser allows it, and again when the app comes back
+  Scale.autoConnect();
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') Scale.autoConnect(); });
 })();
 
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
