@@ -50,22 +50,33 @@ function goalStatus(rate) {
   return {tone: fast ? 'new' : 'hold', text: fast ? 'Faster than planned' : 'Slower than planned'};
 }
 
+/* A sheet without segments: your own split from the most recent earlier scan that had all five segments is the
+   best guess (where you carry fat changes slowly), scaled to today's total. Without one, a typical split. */
+function ownShare(s, part) {
+  const has = x => x.seg && SEGS.every(({k}) => x.seg[k] && x.seg[k][part] != null && x.seg[k][part] !== '' && !isNaN(x.seg[k][part]));
+  const prev = scans().filter(x => x.date < s.date && x.id !== s.id && has(x)).pop();
+  if (!prev) return null;
+  const sum = SEGS.reduce((t, {k}) => t + +prev.seg[k][part], 0);
+  return sum > 0 ? {share: Object.fromEntries(SEGS.map(({k}) => [k, +prev.seg[k][part] / sum])), from: prev.date} : null;
+}
 /* scan → kilograms, with segments filled in (estimated from totals if the sheet had none) */
 function scanKg(s) {
   const k = v => toKg(v, s.unit);
   const weight = k(s.weight);
   const bfm = s.bfm != null && s.bfm !== '' ? k(s.bfm) : (s.pbf != null && weight ? weight * s.pbf / 100 : null);
   const ffm = weight != null && bfm != null ? weight - bfm : null;
-  const seg = {}; let est = false;
+  const seg = {}; let est = false, estFrom = null;
+  const missing = part => SEGS.some(({k: key}) => !(s.seg && s.seg[key]) || k(s.seg[key][part]) == null);
+  const leanOwn = missing('lean') ? ownShare(s, 'lean') : null, fatOwn = missing('fat') ? ownShare(s, 'fat') : null;
   for (const {k: key} of SEGS) {
     const src = (s.seg && s.seg[key]) || {};
     let lean = k(src.lean), fat = k(src.fat);
-    if (lean == null) { lean = ffm != null ? ffm * SEG_SHARE.lean[key] : REF.lean[key]; est = true; }
-    if (fat == null) { fat = bfm != null ? bfm * SEG_SHARE.fat[key] : REF.fat[key]; est = true; }
+    if (lean == null) { lean = ffm != null ? ffm * (leanOwn ? leanOwn.share : SEG_SHARE.lean)[key] : REF.lean[key]; est = true; if (leanOwn) estFrom = leanOwn.from; }
+    if (fat == null) { fat = bfm != null ? bfm * (fatOwn ? fatOwn.share : SEG_SHARE.fat)[key] : REF.fat[key]; est = true; if (fatOwn) estFrom = fatOwn.from; }
     seg[key] = {lean, fat};
   }
   return {date: s.date, weight, bfm, pbf: s.pbf != null && s.pbf !== '' ? +s.pbf : (weight && bfm != null ? bfm / weight * 100 : null),
-    smm: k(s.smm), visceral: s.visceral != null && s.visceral !== '' ? +s.visceral : null, bmr: s.bmr != null && s.bmr !== '' ? +s.bmr : null, seg, est};
+    smm: k(s.smm), visceral: s.visceral != null && s.visceral !== '' ? +s.visceral : null, bmr: s.bmr != null && s.bmr !== '' ? +s.bmr : null, seg, est, estFrom};
 }
 function lerpScan(a, b, t) {
   const L = (x, y) => x == null || y == null ? (t < .5 ? x : y) : x + (y - x) * t;
@@ -257,7 +268,7 @@ function avatarStats(sc, cmp) {
     ${row('Skeletal muscle', m(sc.smm), cmp && m(cmp.smm), u, true)}
     ${row('Fat mass', m(sc.bfm), cmp && m(cmp.bfm), u, false)}
     ${extra.length ? `<p class="small muted num" style="margin:0">${extra.join('<br>')}</p>` : ''}
-    ${sc.est ? '<p class="small muted" style="margin:0">Some segments are estimated from your totals. Add segment numbers for an exact figure.</p>' : ''}`;
+    ${sc.est ? `<p class="small muted" style="margin:0">${sc.estFrom ? `Segments missing from this sheet are estimated: your split from the ${esc(fmtDate(sc.estFrom))} scan, scaled to this scan’s totals.` : 'Some segments are estimated from your totals with a typical split.'} Add the segment numbers for exact figures.</p>` : ''}`;
 }
 function segTable(sc, cmp) {
   const u = unit();

@@ -838,3 +838,21 @@ test('scale screen: + Add food opens on the scale; pick a food, weigh it live, L
   T.A.undo();
   assert.ok(T.S.food.some(x => x.id === id));
 });
+
+test('body scans: missing segmental fat uses your own split from an earlier full scan, scaled to the new total', () => {
+  const T = loadApp();
+  const segs = (lean, fat) => Object.fromEntries(['ra', 'la', 'tr', 'rl', 'll'].map((k, i) => [k, {lean: lean[i], fat: fat[i]}]));
+  // earlier full scan: fat 2/2/12/2/2 = 20 kg, so 60% of it on the trunk
+  T.S.body = [{id: 'a', kind: 'scan', date: Date.now() - 60 * DAY, unit: 'kg', weight: 85, bfm: 20, seg: segs([3.5, 3.5, 28, 10, 10], [2, 2, 12, 2, 2])},
+    {id: 'b', kind: 'scan', date: Date.now() - DAY, unit: 'kg', weight: 83, bfm: 15, seg: segs([3.6, 3.6, 28.5, 10.1, 10.1], ['', '', '', '', ''])}];
+  const sc = T.scanKg(T.S.body[1]);
+  assert.equal(sc.est, true);
+  assert.ok(Math.abs(sc.seg.tr.fat - 9) < 0.01, 'trunk keeps its 60% share of the new 15 kg');
+  assert.ok(Math.abs(sc.seg.ra.fat - 1.5) < 0.01);
+  assert.equal(sc.seg.tr.lean, 28.5, 'lean from the sheet is untouched');
+  assert.ok(sc.estFrom, 'says which scan the split came from');
+  // with no earlier full scan, a typical split
+  T.S.body = [T.S.body[1]];
+  const typical = T.scanKg(T.S.body[0]);
+  assert.ok(Math.abs(typical.seg.tr.fat - 7.5) < 0.01); assert.equal(typical.estFrom, null);
+});
