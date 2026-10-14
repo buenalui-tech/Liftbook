@@ -28,7 +28,7 @@ function loadApp(stored = {}, extra = {}) {
   vm.createContext(ctx);
   // top-level const/let live in the context's script scope; expose the names tests need
   const src = FILES.map(f => fs.readFileSync(new URL(`../js/${f}.js`, import.meta.url), 'utf8')).join('\n;\n') +
-    '\n;globalThis.T = {S, store, suggest, e1rm, niceTicks, weightSeries, weeklyRateKg, caloriesFor, improvements, recomputePRs, muscleLoad, musclesFor, tagFor, lastPerf, scanKg, conv, TEMPLATE, CATALOG, slug, startOfDay, fromUsda, fromOff, rankFoods, unitsFor, portionTotals, autoTargets, dayTotals, estimateBurn, targets, targetsFromBurn, computeTargets, nutritionPrefs, proposeTargets, applyCheckin, runAutoCheckin, checkinDue, copyMeal, foodLogs, viewToday, viewFood, viewProgress, viewBody, viewProgram, viewSheet, viewWorkout, startWorkout, viewSettings, buildPhases, Timer, viewTimer, viewTimerSetup, viewMobilitySetup, MOBILITY, viewTrainingLoad, sessionLoad, specFromVals, specToSheet, cleanSpec, specSecs, finishWorkout, timerOutline, viewTimerSetup, microFromUsda, microFromOff, entryMicro, viewMicros, Micro, fromUsda, portionMicros, Scale, esnParse, esnPacket, SCALE_DRIVERS, scaleAmount, weighLog, repairCalories, usdaNutrients, openPortion, viewPortion, A, viewSettings, matchesQuery, localMatches, searchResultsHTML, onFoodQuery, rememberSearch, searchCache, viewAddFood, ytId, formVideo, FORM_VIDEOS, viewHowto, holdForVideo, playBtn, openCollection, saveCollection, recipeAsFood, setItemAmount, parseSpoken, applySpoken, lookupBarcode, relogLast, savePortion, viewCollection, TEMPLATE_COPY: () => JSON.parse(JSON.stringify(TEMPLATE))};';
+    '\n;globalThis.T = {S, store, suggest, e1rm, niceTicks, weightSeries, weeklyRateKg, caloriesFor, improvements, recomputePRs, muscleLoad, musclesFor, tagFor, lastPerf, scanKg, conv, TEMPLATE, CATALOG, slug, startOfDay, fromUsda, fromOff, rankFoods, unitsFor, portionTotals, autoTargets, dayTotals, estimateBurn, targets, targetsFromBurn, computeTargets, nutritionPrefs, proposeTargets, applyCheckin, runAutoCheckin, checkinDue, copyMeal, foodLogs, viewToday, viewFood, viewProgress, viewBody, viewProgram, viewSheet, viewWorkout, startWorkout, viewSettings, buildPhases, Timer, viewTimer, viewTimerSetup, viewMobilitySetup, MOBILITY, viewTrainingLoad, sessionLoad, specFromVals, specToSheet, cleanSpec, specSecs, finishWorkout, timerOutline, viewTimerSetup, microFromUsda, microFromOff, entryMicro, viewMicros, Micro, fromUsda, portionMicros, Scale, esnParse, esnPacket, SCALE_DRIVERS, scaleAmount, weighLog, repairCalories, usdaNutrients, labelMismatch, openPortion, viewPortion, A, viewSettings, matchesQuery, localMatches, searchResultsHTML, onFoodQuery, rememberSearch, searchCache, viewAddFood, ytId, formVideo, FORM_VIDEOS, viewHowto, holdForVideo, playBtn, openCollection, saveCollection, recipeAsFood, setItemAmount, parseSpoken, applySpoken, lookupBarcode, relogLast, savePortion, viewCollection, TEMPLATE_COPY: () => JSON.parse(JSON.stringify(TEMPLATE))};';
   vm.runInContext(src, ctx, {filename: 'liftbook.js'});
   return ctx.T;
 }
@@ -868,4 +868,20 @@ test('calories: never 0 when the macros are there, from any source, and old entr
   assert.equal(T.repairCalories(), 1);
   assert.ok(Math.abs(T.S.food[0].totals.kcal - 125.3) < 0.1); assert.equal(T.S.food[0].food.per100.kcal, 51.2);
   assert.equal(T.repairCalories(), 0, 'once only');
+});
+
+test('labels that don’t add up are flagged: the Kirkland ultra-filtered milk entry in Open Food Facts', () => {
+  const T = loadApp();
+  // as it is in Open Food Facts: 0 kcal, energy only in kJ, and 13 g protein entered per 100 g instead of per cup
+  const milk = T.fromOff({code: '0196633809858', product_name: 'Ultra filtered reduced fat milk', brands: 'Kirkland', serving_size: '1 portion (1 cup)', serving_quantity: 240,
+    nutriments: {'energy-kcal_100g': 0, 'energy-kj_100g': 203.96, energy_100g: 203.96, proteins_100g: 13, carbohydrates_100g: 2.5, fat_100g: 1.875}});
+  assert.equal(Math.round(milk.per100.kcal * 2.4), 117, 'calories come from the kilojoules: about 117 a cup');
+  const mm = T.labelMismatch(milk);
+  assert.ok(mm && mm.macros > mm.kcal * 1.3, 'the protein typo is caught');
+  T.S.sheet = {type: 'add-food', meal: 'breakfast', mode: 'search'};
+  T.openPortion(milk, 'breakfast');
+  assert.ok(T.viewPortion().includes('These numbers don’t add up'));
+  // ordinary foods aren't flagged
+  assert.equal(T.labelMismatch({name: 'Broccoli', per100: {kcal: 34, p: 2.8, c: 6.6, f: 0.4}}), null);
+  assert.equal(T.labelMismatch({name: 'Light beer', per100: {kcal: 29, p: 0.2, c: 1.3, f: 0}}), null);
 });

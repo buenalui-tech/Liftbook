@@ -215,7 +215,7 @@ const A = {
   'food-relog': d => { const sh = S.sheet, e = sh.local && sh.local[+d.v]; if (e && e.last) relogLast(e, sh.meal); },
   undo: () => { const f = undoFn; undoFn = null; const t = document.getElementById('toast'); if (t) t.hidden = true; if (f) f(); },
   'food-mic': () => VoiceSearch.start(S.sheet),
-  'food-fix': () => { const sh = S.sheet; S.sheet = {type: 'custom-food', meal: sh.meal, pre: prefillFromFood(sh.food), into: sh.back && sh.back.into}; render(); },
+  'food-fix': () => { const sh = S.sheet; S.sheet = {type: 'custom-food', meal: sh.meal, pre: prefillFromFood(sh.food), fixKey: sh.food.key, into: sh.back && sh.back.into}; render(); },
   'custom-edit': d => {
     const c = S.food.find(x => x.id === d.v); if (!c) return;
     S.sheet = {type: 'custom-food', meal: S.sheet.meal, editId: c.id, back: S.sheet, pre: {name: c.name, brand: c.brand, barcode: c.barcode, servingLabel: c.servingLabel, servingGrams: c.servingGrams, perServing: c.perServing}}; render();

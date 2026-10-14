@@ -29,6 +29,13 @@ function usdaNutrients(list) {
   const kcal = firstPositive(by[1008], by[2047], by[2048], by[1062] / 4.184) ?? kcalFromMacros({p, c, f});
   return {kcal, p, c, f, fiber: by[1079] || 0};
 }
+// a label whose calories and macros disagree by a lot has a typo somewhere (alcohol excepted: it has calories of its own)
+function labelMismatch(f) {
+  const n = f && (f.per100 || f.perServing); if (!n || !(n.kcal > 0) || /\b(beer|wine|vodka|whisk|rum|gin|tequila|liqueur|liquor|sake|seltzer|cider|alcohol)/i.test(f.name || '')) return null;
+  const m = kcalFromMacros(n);
+  if (Math.max(m, n.kcal) < 25 || Math.abs(m - n.kcal) / Math.max(m, n.kcal) <= 0.3) return null;
+  return {kcal: n.kcal, macros: m, per: f.per100 ? '100 g' : 'serving'};
+}
 // foods logged before calories were worked out this way: fill them in (the macros were right all along)
 function repairCalories(list = S.food) {
   let fixed = 0;
@@ -438,9 +445,10 @@ function viewPortion() {
   const into = sh.back && sh.back.into, labelled = f.dataType === 'Branded' || f.source === 'off';
   return `<div class="row between"><h2>${sh.editId ? 'Edit food' : into ? `Add to ${esc(into.draft.name || into.kind)}` : 'Add food'}</h2><button class="iconbtn" data-act="${sh.editId ? 'sheet-close' : 'portion-back'}" aria-label="Back">✕</button></div>
     <div class="stack" style="gap:2px"><b>${esc(f.name)}</b><span class="small muted">${esc([f.brand, f.dataType === 'Branded' ? 'Package label (USDA)' : f.source === 'usda' ? 'USDA FoodData Central' : f.source === 'off' ? 'Package label (Open Food Facts)' : f.source === 'quick' ? 'Quick add' : f.source === 'recipe' ? 'My recipe' : 'My food'].filter(Boolean).join(' · '))}</span>
-      ${labelled ? '<button class="linkbtn small" data-act="food-fix" style="align-self:flex-start">Numbers don’t match the package? Fix them</button>' : ''}</div>
+      ${(() => { const mm = labelMismatch(f); return mm && f.source !== 'custom' && f.source !== 'recipe' ? `<div class="banner small" style="flex-direction:column;align-items:flex-start;gap:4px"><span><b>These numbers don’t add up.</b> The calories say ${fmtNum(mm.kcal)} per ${mm.per}, but the protein, carbs and fat add up to ${fmtNum(mm.macros)}. Check them against the package.</span><button class="linkbtn" data-act="food-fix">Fix them</button></div>`
+        : labelled ? '<button class="linkbtn small" data-act="food-fix" style="align-self:flex-start">Numbers don’t match the package? Fix them</button>' : ''; })()}</div>
     ${f.source === 'quick' ? '' : sh.weigh && Scale.status === 'on' ? weighBlock(sh) : `<div class="row"><label class="field" style="width:110px">Amount<input id="po-qty" data-in="po-qty" inputmode="decimal" value="${esc(sh.qty)}"></label>
-      <label class="field grow">Unit<select id="po-unit" data-in="po-unit">${units.map(u => `<option value="${u.id}" ${u.id === sh.unit ? 'selected' : ''}>${esc(u.label)}${u.grams && u.id !== 'g' && u.id !== 'oz' && !/\d\s*(g|ml)\b/i.test(u.label) ? ` (${r1(u.grams)} g)` : ''}</option>`).join('')}</select></label></div>
+      <label class="field grow">Unit<select id="po-unit" data-in="po-unit">${units.map(u => `<option value="${u.id}" ${u.id === sh.unit ? 'selected' : ''}>${esc(u.label)}${u.grams && !['g', 'oz', 'ml', 'floz'].includes(u.id) && !/\d\s*(g|ml)\b/i.test(u.label) ? ` (${r1(u.grams)} g)` : ''}</option>`).join('')}</select></label></div>
       ${weighBlock(sh)}`}
     <div class="stats" id="po-totals">${portionStats(totals, grams)}</div>
     <p class="small" id="po-micros" style="margin:0">${portionMicros(f, grams, +sh.qty || 0)}</p>
@@ -502,6 +510,18 @@ function saveCustomFood() {
   delete c.updatedAt;
   if (!old) S.food.push(c);
   store.saveFood(c); toast(`${name} saved`);
+  if (sh.fixKey) {
+    const food = customAsFood(c), since = startOfDay(Date.now()) - 30 * DAY;
+    let n = 0;
+    for (const e of S.food) {
+      if (e.kind !== 'log' || !e.food || e.food.key !== sh.fixKey || e.date < since) continue;
+      const unit = unitsFor(food).some(u => u.id === e.unit) ? e.unit : unitsFor(food)[0].id;
+      const qty = unit === e.unit ? e.qty : e.grams && food.per100 ? e.grams : e.qty;
+      Object.assign(e, itemFromPortion(food, qty, food.per100 && unit !== e.unit && e.grams ? 'g' : unit)); delete e.updatedAt; store.saveFood(e); n++;
+    }
+    if (n) toast(`${name} saved. ${n} logged ${n === 1 ? 'entry' : 'entries'} corrected too.`);
+    if (!sh.into) { S.sheet = null; render(); return; }
+  }
   if (old) { S.sheet = sh.back || null; render(); return; }
   const food = customAsFood(c);
   S.sheet = {type: 'add-food', meal, mode: 'mine', into: sh.into};
