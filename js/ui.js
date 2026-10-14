@@ -486,7 +486,7 @@ function viewSheet() {
       ${w.conditioning ? `<div class="stack" style="gap:2px"><b>${esc(w.conditioning.name)}</b><span class="small muted num">${esc(conditioningLine(w.conditioning))}</span></div>` : ''}
       <button class="btn danger block ${S.armed === 'del' + w.id ? 'armed' : ''}" data-act="del-workout" data-v="${esc(w.id)}">${S.armed === 'del' + w.id ? 'Tap again to delete' : 'Delete workout'}</button>`;
   }
-  return `<div class="scrim" data-act="scrim"><div class="sheet ${S.sheet && S.sheet.weigh ? 'full' : ''}" role="dialog" aria-modal="true">${body}</div></div>`;
+  return `<div class="scrim" data-act="scrim"><div class="sheet ${S.sheet && (S.sheet.weigh || S.sheet.type === 'add-food') ? 'full' : ''}" role="dialog" aria-modal="true">${body}</div></div>`;
 }
 
 function viewProgress() {

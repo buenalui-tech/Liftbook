@@ -565,7 +565,7 @@ test('food search: your own foods first and instantly, meal-aware, no autocorrec
   T.S.sheet = sh;
   const html = T.viewAddFood();
   assert.ok(html.includes('autocorrect="off"') && html.includes('spellcheck="false"'), 'the keyboard won’t rewrite food names');
-  assert.ok(html.includes('Your usual breakfast') && html.includes('last time 80 g'));
+  assert.ok(html.includes('Your usual breakfast') && html.includes('data-act="food-quick"'), 'your usual foods, each with a one-tap +');
   // typing shows your own match at once, and a cached database search answers without waiting
   T.searchCache.set('greek', {results: [food('db1', 'Yogurt, Greek, nonfat'), yog], partial: false});
   T.onFoodQuery('greek');
@@ -723,8 +723,8 @@ test('fast logging: + adds last time’s amount and can be undone; the calorie l
   const oats = {key: 'usda:o', source: 'usda', sourceId: 'o', name: 'Oats', per100: {kcal: 380, p: 13, c: 67, f: 7, fiber: 10}, servings: []};
   T.S.food = [{id: 'l1', kind: 'log', date: Date.now() - DAY, meal: 'breakfast', food: oats, qty: 80, unit: 'g', qtyLabel: '80 g', grams: 80, totals: {kcal: 304, p: 10, c: 54, f: 6, fiber: 8}}];
   T.S.sheet = {type: 'add-food', meal: 'breakfast', mode: 'search', q: ''};
-  assert.ok(T.viewSheet().includes('data-act="food-relog"'));
-  T.A['food-relog']({v: 0});
+  assert.ok(T.viewSheet().includes('data-act="food-quick"'));
+  T.A['food-quick']({v: 0});
   const added = T.S.food.filter(x => x.kind === 'log' && T.startOfDay(x.date) === T.startOfDay(Date.now()));
   assert.equal(added.length, 1); assert.equal(added[0].grams, 80);
   assert.equal(T.S.sheet.type, 'add-food', 'the sheet stays open for the next food');
@@ -884,4 +884,36 @@ test('labels that don’t add up are flagged: the Kirkland ultra-filtered milk e
   // ordinary foods aren't flagged
   assert.equal(T.labelMismatch({name: 'Broccoli', per100: {kcal: 34, p: 2.8, c: 6.6, f: 0.4}}), null);
   assert.equal(T.labelMismatch({name: 'Light beer', per100: {kcal: 29, p: 0.2, c: 1.3, f: 0}}), null);
+});
+
+test('logging food: + adds at the usual amount and keeps the list open; the amount screen goes back to the list', () => {
+  const T = loadApp();
+  const banana = {key: 'usda:b', source: 'usda', sourceId: 'b', name: 'Banana, raw', per100: {kcal: 89, p: 1.1, c: 23, f: 0.3, fiber: 2.6}, servings: [{label: '1 medium', grams: 118}]};
+  T.S.sheet = {type: 'add-food', meal: 'snack', mode: 'search', q: 'banana', remote: [banana], remoteQ: 'banana'};
+  const html = T.viewSheet();
+  assert.ok(html.includes('1 medium · 105 kcal'), 'a real portion, not per 100 g');
+  assert.ok(html.includes('class="sheet full"'), 'the list gets the whole screen');
+  T.A['food-quick']({v: 0});
+  assert.equal(T.S.sheet.type, 'add-food'); assert.equal(T.S.sheet.added.length, 1);
+  assert.ok(T.viewSheet().includes('1 added'), 'a running count with Done');
+  // the amount screen, then back to the list
+  T.A['food-pick']({v: 0});
+  assert.equal(T.S.sheet.type, 'portion');
+  assert.ok(T.viewSheet().includes('data-act="po-qty-set"'), 'one-tap amounts');
+  T.A['po-qty-set']({v: 2}); T.savePortion();
+  assert.equal(T.S.sheet.type, 'add-food'); assert.equal(T.S.sheet.added.length, 2);
+  assert.equal(T.S.food.filter(x => x.kind === 'log').reduce((s, x) => s + x.grams, 0), 118 * 3);
+});
+
+test('a weighted set can’t be ticked without a weight (it would look like it never happened)', () => {
+  const T = loadApp();
+  T.S.program = T.TEMPLATE_COPY();
+  T.startWorkout(T.S.program.routines[0].id);
+  T.A.set({e: 0, s: 0});
+  assert.equal(T.S.active.exercises[0].sets[0].done, false, 'first time, no weight: not ticked');
+  T.S.active.exercises[0].sets[0].w = 135;
+  T.A.set({e: 0, s: 0});
+  assert.equal(T.S.active.exercises[0].sets[0].done, true);
+  T.A.set({e: 0, s: 1});
+  assert.equal(T.S.active.exercises[0].sets[1].w, 135, 'the next set carries the weight');
 });

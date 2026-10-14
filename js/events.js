@@ -204,6 +204,20 @@ const A = {
   'food-edit': d => { const e = S.food.find(x => x.id === d.v); if (e) { S.sheet = null; openPortion(e.food, e.meal, e); } },
   'portion-back': () => { S.sheet = S.sheet.back || null; render(); },
   'po-meal': d => { S.sheet.meal = d.v; render(); },
+  'po-qty-set': d => { S.sheet.qty = +d.v; render(); },
+  // + on a food: add it at its usual amount and stay in the list for the next one
+  'food-quick': d => {
+    const sh = S.sheet, f = sh.results && sh.results[+d.v]; if (!f) return;
+    if ((sh.q || '').trim() && (sh.remote || []).includes(f)) rememberSearch(sh.q);
+    const p = defaultPortion(f), item = itemFromPortion(f, p.qty, p.unit);
+    if (sh.into) { sh.into.draft.items.push(item); toast(`${f.name} added`); render(); return; }
+    const day = S.day || startOfDay(Date.now());
+    const e = {id: newId(), kind: 'log', date: day === startOfDay(Date.now()) ? Date.now() : day + 12 * 3600000, meal: sh.meal, ...item};
+    S.food.push(e); store.saveFood(e);
+    sh.added = [...(sh.added || []), {name: f.name, label: item.qtyLabel, kcal: item.totals.kcal, id: e.id}];
+    render();
+    toastUndo(`${f.name} · ${item.qtyLabel} added`, () => { S.food = S.food.filter(x => x.id !== e.id); store.deleteFood(e.id); sh.added = sh.added.filter(a => a.id !== e.id); render(); });
+  },
   'portion-save': () => savePortion(),
   'portion-save-next': () => {
     const meal = S.sheet.meal, into = S.sheet.back && S.sheet.back.into;

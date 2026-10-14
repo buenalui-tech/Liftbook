@@ -116,6 +116,14 @@ function toggleSet(ei, si) {
       s.w = before ?? (p && p.w ? p.w : null);
     }
     if (!(s.r > 0)) { toast('Enter reps first'); return; }
+    // a weighted lift ticked with no weight (usually the first time) would be saved as reps only and look like it
+    // never happened next week: ask for the weight instead
+    if (!e.timed && e.kind !== 'bodyweight' && !(s.w > 0)) {
+      s.r = s.r === repsPlaceholder(e, si) ? null : s.r;
+      toast(`Enter the weight for ${e.name.replace(/ \(.*\)$/, '')} first`);
+      render(); const w = document.getElementById(`w-${ei}-${si}`); if (w && w.focus) w.focus();
+      return;
+    }
     s.done = true; if (setting('autoRest')) startRest(e.rest);
   } else s.done = false;
   saveActiveSoon(); render();

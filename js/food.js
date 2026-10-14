@@ -235,6 +235,12 @@ function foodDayNav() {
     <div class="stack" style="gap:0;text-align:center"><b>${label}</b><span class="small muted">${new Date(day).toLocaleDateString(undefined, {month: 'long', day: 'numeric'})}</span></div>
     <button class="iconbtn" data-act="day-step" data-v="1" aria-label="Next day" ${day >= today ? 'disabled' : ''}>›</button></div>`;
 }
+// the three macros side by side, so the diary starts right below
+function macroMini(label, val, target, cls) {
+  const pct = target ? Math.min(100, val / target * 100) : 0, over = target && val > target * 1.05;
+  return `<div class="mm"><span class="small muted">${label}</span><span class="num"><b>${Math.round(val)}</b>${target ? `<small> / ${Math.round(target)} g</small>` : '<small> g</small>'}</span>
+    <div class="mac-tr"><div class="mac-v ${cls} ${over ? 'over' : ''}" style="width:${pct}%"></div></div></div>`;
+}
 function macroBar(label, val, target, unitLbl, cls) {
   const pct = target ? Math.min(100, val / target * 100) : 0, over = target && val > target * 1.05;
   return `<div class="mac"><div class="row between small"><span>${label}</span><span class="num"><b>${Math.round(val)}</b>${target ? ` / ${Math.round(target)}` : ''} ${unitLbl}</span></div>
@@ -250,22 +256,20 @@ function viewFood() {
   const meals = MEALS.map(([m, label]) => {
     const items = foodLogs(day).filter(x => x.meal === m).sort((a, b) => a.date - b.date);
     const kcal = items.reduce((s, x) => s + (x.totals.kcal || 0), 0);
-    return `<section class="card meal"><div class="row between"><h3>${label}</h3><span class="small muted num">${items.length ? fmtNum(kcal) + ' kcal' : ''}</span></div>
+    const extras = [!items.length && foodLogs(yesterday).some(x => x.meal === m) ? `<button class="btn ghost" data-act="meal-copy" data-v="${m}">Same as yesterday</button>` : '',
+      items.length > 1 ? `<button class="btn ghost" data-act="meal-save-open" data-v="${m}" style="color:var(--muted)">Save as a meal</button>` : ''].filter(Boolean).join('');
+    return `<section class="card meal"><div class="meal-head"><h3>${label}</h3><span class="small muted num">${items.length ? fmtNum(kcal) + ' kcal' : ''}</span>
+        <button class="add-round" data-act="food-add" data-v="${m}" aria-label="Add food to ${label}">+</button></div>
       ${items.map(x => `<button class="food-row" data-act="food-edit" data-v="${esc(x.id)}">
         <span class="stack" style="gap:0;min-width:0"><span class="fname">${esc(x.food.name)}</span><span class="small muted">${esc([x.food.brand, x.qtyLabel].filter(Boolean).join(' · '))}</span></span>
         <span class="num fk"><b>${fmtNum(x.totals.kcal)}</b><span class="small muted">${Math.round(x.totals.p)}g P</span></span></button>`).join('')}
-      <div class="row" style="flex-wrap:wrap;gap:4px">
-        <button class="btn ghost" data-act="food-add" data-v="${m}">+ Add food</button>
-        ${!items.length && foodLogs(yesterday).some(x => x.meal === m) ? `<button class="btn ghost" data-act="meal-copy" data-v="${m}">Copy yesterday’s ${label.toLowerCase()}</button>` : ''}
-        ${items.length > 1 ? `<button class="btn ghost" data-act="meal-save-open" data-v="${m}" style="color:var(--muted)">Save as a meal</button>` : ''}
-      </div></section>`;
+      ${extras ? `<div class="row" style="flex-wrap:wrap;gap:4px">${extras}</div>` : ''}</section>`;
   }).join('');
   return `${brand('Food')}${storageBanner()}
     ${day === today ? autoCheckinBanner() : ''}
     ${due ? viewCheckin(due) : ''}
     ${foodDayNav()}
-    ${Scale.supported() || Scale.status === 'on' ? `<button class="btn block weigh-entry" data-act="wm-open">${ICON_SCALE} Weigh food on the scale</button>` : ''}
-    <section class="card">
+    <section class="card food-sum">
       ${tg ? `<div class="cal-line num" role="group" aria-label="Calories: goal minus food equals remaining">
             <div><b>${fmtNum(tg.kcal)}</b><span>Goal</span></div><i aria-hidden="true">−</i>
             <div><b>${fmtNum(tot.kcal)}</b><span>Food</span></div><i aria-hidden="true">=</i>
@@ -273,7 +277,11 @@ function viewFood() {
           <div class="mac-tr big"><div class="mac-v kc ${left < 0 ? 'over' : ''}" style="width:${Math.min(100, tot.kcal / tg.kcal * 100)}%"></div></div>`
         : `<div><b class="num kcal-big">${fmtNum(tot.kcal)}</b> <span class="muted">kcal</span></div>
            <p class="small muted" style="margin:0">Log a weigh-in on the Body tab and Liftbook sets calorie and protein targets for you, or tap Set targets to enter your own.</p>`}
-      ${macroBar('Protein', tot.p, tg && tg.p, 'g', 'p')}${macroBar('Carbs', tot.c, tg && tg.c, 'g', 'c')}${macroBar('Fat', tot.f, tg && tg.f, 'g', 'f')}
+      <div class="mac-row">${macroMini('Protein', tot.p, tg && tg.p, 'p')}${macroMini('Carbs', tot.c, tg && tg.c, 'c')}${macroMini('Fat', tot.f, tg && tg.f, 'f')}</div>
+    </section>
+    ${Scale.supported() || Scale.status === 'on' ? `<button class="btn block weigh-entry" data-act="wm-open">${ICON_SCALE} Weigh food on the scale</button>` : ''}
+    ${meals}
+    <section class="card day-details">
       ${foodLogs(day).length ? `<details class="day-micros" id="food-micros" ${S.foodMicroOpen ? 'open' : ''}><summary><span>Fiber, vitamins and minerals</span><span class="row" style="gap:6px">${S.foodMicroOpen ? '' : `<span class="num muted">Fiber ${tot.fiber >= 10 ? Math.round(tot.fiber) : r1(tot.fiber)} g</span>`}<span class="chev" aria-hidden="true">›</span></span></summary>
         ${S.foodMicroOpen ? microList(foodLogs(day), 1, true) : ''}</details>` : ''}
       <div class="row small muted" style="justify-content:flex-end"><button class="btn edit-tg" data-act="targets-open">${tg ? 'Edit targets' : 'Set targets'}</button></div>
@@ -281,7 +289,6 @@ function viewFood() {
       <label class="row small partial-day"><input type="checkbox" data-act="day-incomplete" ${partial ? 'checked' : ''}> I didn’t log everything ${day === today ? 'today' : 'this day'}
         <span class="muted">(left out when Liftbook learns your burn)</span></label>
     </section>
-    ${meals}
     <p class="small muted">Food data: <a href="https://fdc.nal.usda.gov/" target="_blank" rel="noopener">USDA FoodData Central</a> and <a href="https://world.openfoodfacts.org/" target="_blank" rel="noopener">Open Food Facts</a> (ODbL).</p>
     ${Sync.missing.food_entries ? `<div class="banner">Food is saved on this phone but isn’t syncing yet. Run <b>supabase/004_food_entries.sql</b> in the Supabase SQL Editor.</div>` : ''}`;
 }
@@ -328,8 +335,8 @@ function searchResultsHTML(sh) {
   const q = (sh.q || '').trim(), local = localMatches(q, sh.meal), seen = new Set(local.map(e => e.food.key));
   const meals = q && !sh.into && !sh.weigh ? S.food.filter(x => x.kind === 'meal' && matchesQuery(x.name, q)) : [];
   // your own foods: tap to choose an amount, or + to add last time's amount right away
-  const own = (e, i, note) => sh.into || sh.weigh || !e.last ? foodResult(e.food, i, note)
-    : `<div class="lib-row">${foodResult(e.food, i, note)}<button class="quick-plus" data-act="food-relog" data-v="${i}" aria-label="Add ${esc(e.food.name)}, ${esc(e.last.qtyLabel || 'same amount')}">+</button></div>`;
+  lastUseCache = null;
+  const own = (e, i) => foodResult(e.food, i, '', !sh.weigh);
   sh.local = local;
   const remote = q.length >= 2 && sh.remoteQ === q ? (sh.remote || []).filter(f => !seen.has(f.key)) : [];
   sh.results = [...local.map(e => e.food), ...remote];
@@ -338,13 +345,13 @@ function searchResultsHTML(sh) {
   if (!q) {
     const searches = (S.profile.recentSearches || []).slice(0, 6);
     out += searches.length ? `<div class="chips recent-q">${searches.map(s => `<button class="chipbtn" data-act="food-q-pick" data-v="${esc(s)}">${esc(s)}</button>`).join('')}</div>` : '';
-    out += local.length ? `<p class="eyebrow" style="margin:0">${sh.into ? 'Your foods' : `Your usual ${esc(mealLabel(sh.meal).toLowerCase())}`}</p><div class="lib">${local.map((e, i) => own(e, i, portion(e))).join('')}</div>`
+    out += local.length ? `<p class="eyebrow" style="margin:0">${sh.into ? 'Your foods' : `Your usual ${esc(mealLabel(sh.meal).toLowerCase())}`}</p><div class="lib">${local.map((e, i) => own(e, i)).join('')}</div>`
       : '<p class="small muted">Search for a food, or scan a barcode. Foods you log show up here first next time, ready to add again in one tap.</p>';
     return out;
   }
-  if (local.length || meals.length) out += `<p class="eyebrow" style="margin:0">Yours</p><div class="lib">${meals.map(m => `<button data-act="saved-meal-log" data-v="${esc(m.id)}"><span class="stack" style="gap:1px;min-width:0;text-align:left"><span class="fname">${esc(m.name)}</span><span class="small muted">${m.items.length} items · ${fmtNum(mealKcal(m))} kcal</span></span><span class="src custom">Meal</span></button>`).join('')}${local.map((e, i) => own(e, i, portion(e))).join('')}</div>`;
+  if (local.length || meals.length) out += `<p class="eyebrow" style="margin:0">Yours</p><div class="lib">${meals.map(m => `<button data-act="saved-meal-log" data-v="${esc(m.id)}"><span class="stack" style="gap:1px;min-width:0;text-align:left"><span class="fname">${esc(m.name)}</span><span class="small muted">${m.items.length} items · ${fmtNum(mealKcal(m))} kcal</span></span><span class="src custom">Meal</span></button>`).join('')}${local.map((e, i) => own(e, i)).join('')}</div>`;
   if (q.length < 2) return out;
-  if (remote.length) out += `<p class="eyebrow" style="margin:0">Food database</p><div class="lib">${remote.map((f, i) => foodResult(f, local.length + i)).join('')}</div>`;
+  if (remote.length) out += `<p class="eyebrow" style="margin:0">Food database</p><div class="lib">${remote.map((f, i) => foodResult(f, local.length + i, '', !sh.weigh)).join('')}</div>`;
   if (sh.loading) out += '<p class="small muted" style="margin:0">Searching the food database…</p>';
   else if (sh.remoteQ === q && !remote.length && !local.length && !meals.length) out += `<p class="small muted">No matches for “${esc(q)}”. Try fewer words, or create it under My foods.</p>`;
   if (sh.partial && sh.remoteQ === q) out += '<p class="small muted" style="margin:0">One of the food databases didn’t answer, so results may be incomplete.</p>';
@@ -393,15 +400,32 @@ function viewAddFood() {
     ${sh.weigh && Scale.status === 'on' ? weighHeader(sh) : sh.weigh ? `<button class="btn primary block" data-act="wm-open">${ICON_SCALE} ${Scale.status === 'connecting' ? 'Connecting to the scale…' : 'Connect the scale'}</button>` : ''}
     <div class="seg tabs3" role="tablist">${tabs.map(([k, l]) => `<button data-act="food-mode" data-v="${k}" aria-pressed="${mode === k}">${l}</button>`).join('')}</div>
     ${body}
-    ${sh.weigh ? '<button class="btn ghost" data-act="wm-exit" style="align-self:center">Add without the scale</button>' : ''}`;
+    ${sh.weigh ? '<button class="btn ghost" data-act="wm-exit" style="align-self:center">Add without the scale</button>' : ''}
+    ${!sh.weigh && (sh.added || []).length ? `<div class="add-foot"><span><b>${sh.added.length} added</b> · ${fmtNum(sh.added.reduce((s, a) => s + (a.kcal || 0), 0))} kcal</span><button class="btn primary" data-act="sheet-close">Done</button></div>` : ''}`;
 }
 const mealLabel = m => (MEALS.find(x => x[0] === m) || [, 'Snacks'])[1];
 const BARCODE_ICON = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M3 7V4h3M21 7V4h-3M3 17v3h3M21 17v3h-3M7 8v8M10 8v8M13 8v8M17 8v8"/></svg>';
-function foodResult(x, i, note) {
-  const per = x.per100 ? `${fmtNum(x.per100.kcal)} kcal · ${r1(x.per100.p)}g P per 100 g` : x.perServing ? `${fmtNum(x.perServing.kcal)} kcal per serving` : '';
-  return `<button data-act="food-pick" data-v="${i}"><span class="stack" style="gap:1px;min-width:0;text-align:left"><span class="fname">${esc(x.name)}</span>
-    <span class="small muted">${esc([x.brand, note || per].filter(Boolean).join(' · '))}</span></span>
-    <span class="src ${x.source}">${x.source === 'usda' ? (x.dataType === 'Branded' ? 'Label' : 'USDA') : x.source === 'off' ? 'Label' : x.source === 'recipe' ? 'Recipe' : 'Mine'}</span></button>`;
+/* The amount a food is shown and quick-added at: what you had last time, else its own unit ("1 medium", "1 cup"),
+   else 100 g. Results show that, not "per 100 g", because that's what you'll actually eat. */
+let lastUseCache = null;
+function lastUse(key) {
+  if (!lastUseCache) { lastUseCache = new Map(); for (const x of [...S.food].filter(e => e.kind === 'log' && e.food).sort((a, b) => a.date - b.date)) lastUseCache.set(x.food.key, x); }
+  return lastUseCache.get(key) || null;
+}
+function defaultPortion(f) {
+  const units = unitsFor(f), last = lastUse(f.key);
+  let u = last && units.find(x => x.id === last.unit), qty = last ? last.qty : null;
+  if (!u) { u = units[0]; qty = u.id === 'g' ? 100 : 1; }
+  const {totals} = portionTotals(f, qty, u.id);
+  return {qty, unit: u.id, label: qtyLabelFor(f, qty, u), kcal: totals.kcal, last: !!last};
+}
+const SRC_TAG = x => x.source === 'off' || x.dataType === 'Branded' ? 'label' : x.source === 'recipe' ? 'recipe' : x.source === 'custom' ? 'mine' : '';
+function foodResult(x, i, note, quick) {
+  const d = defaultPortion(x), tag = SRC_TAG(x);
+  const sub = [x.brand, `${d.label} · ${fmtNum(d.kcal)} kcal`, tag].filter(Boolean).join(' · ');
+  const row = `<button data-act="food-pick" data-v="${i}"><span class="stack" style="gap:1px;min-width:0;text-align:left"><span class="fname">${esc(x.name)}</span>
+    <span class="small muted">${esc(sub)}</span></span></button>`;
+  return quick ? `<div class="lib-row">${row}<button class="quick-plus" data-act="food-quick" data-v="${i}" aria-label="Add ${esc(x.name)}, ${esc(d.label)}">+</button></div>` : row;
 }
 // typing: your own foods repaint at once; the databases are asked after a short pause, and remembered
 function onFoodQuery(q) {
@@ -450,12 +474,19 @@ function viewPortion() {
     ${f.source === 'quick' ? '' : sh.weigh && Scale.status === 'on' ? weighBlock(sh) : `<div class="row"><label class="field" style="width:110px">Amount<input id="po-qty" data-in="po-qty" inputmode="decimal" value="${esc(sh.qty)}"></label>
       <label class="field grow">Unit<select id="po-unit" data-in="po-unit">${units.map(u => `<option value="${u.id}" ${u.id === sh.unit ? 'selected' : ''}>${esc(u.label)}${u.grams && !['g', 'oz', 'ml', 'floz'].includes(u.id) && !/\d\s*(g|ml)\b/i.test(u.label) ? ` (${r1(u.grams)} g)` : ''}</option>`).join('')}</select></label></div>
       ${weighBlock(sh)}`}
+    ${f.source === 'quick' || (sh.weigh && Scale.status === 'on') ? '' : `<div class="chips qty-chips" role="group" aria-label="Quick amounts">${quickAmounts(f, sh.unit).map(q => `<button class="chipbtn" data-act="po-qty-set" data-v="${q}" aria-pressed="${+sh.qty === q}">${fmtW(q)}${sh.unit === 'g' ? ' g' : sh.unit === 'oz' ? ' oz' : sh.unit === 'ml' ? ' ml' : sh.unit === 'floz' ? ' fl oz' : '×'}</button>`).join('')}</div>`}
     <div class="stats" id="po-totals">${portionStats(totals, grams)}</div>
     <p class="small" id="po-micros" style="margin:0">${portionMicros(f, grams, +sh.qty || 0)}</p>
     ${into ? '' : `<div class="chips" role="group" aria-label="Meal">${MEALS.map(([m, l]) => `<button class="chipbtn" data-act="po-meal" data-v="${m}" aria-pressed="${sh.meal === m}">${l}</button>`).join('')}</div>`}
     <button class="btn primary lg block" data-act="portion-save">${sh.editId ? 'Save changes' : into ? `Add to ${into.kind}` : `Add to ${esc(mealLabel(sh.meal))}`}</button>
     ${sh.weigh && Scale.status === 'on' && !sh.editId ? '<button class="btn block" data-act="portion-save-next">Add, then weigh the next food</button>' : ''}
     ${sh.editId ? `<button class="btn danger block ${S.armed === 'fdel' ? 'armed' : ''}" data-act="food-del">${S.armed === 'fdel' ? 'Tap again to remove' : 'Remove from log'}</button>` : ''}`;
+}
+// one-tap amounts for the unit picked, with last time's amount among them
+function quickAmounts(f, unit) {
+  const base = unit === 'g' ? [50, 100, 150, 200] : unit === 'oz' ? [2, 4, 6, 8] : unit === 'ml' ? [120, 240, 355, 500] : unit === 'floz' ? [4, 8, 12, 16] : [0.5, 1, 1.5, 2];
+  const last = lastUse(f.key);
+  return [...new Set([...(last && last.unit === unit ? [last.qty] : []), ...base])].sort((a, b) => a - b).slice(0, 5);
 }
 const portionStats = (t, grams) => `<div class="stat"><b class="num">${fmtNum(t.kcal)}</b><span>kcal${grams ? ` · ${fmtNum(grams)} g` : ''}</span></div>
   <div class="stat"><b class="num">${r1(t.p)}</b><span>Protein g</span></div><div class="stat"><b class="num">${r1(t.c)} / ${r1(t.f)}</b><span>Carbs / fat g</span></div>`;
@@ -474,7 +505,14 @@ function savePortion() {
   const e = existing || {id: newId(), kind: 'log', date: day === startOfDay(Date.now()) ? Date.now() : day + 12 * 3600000};
   Object.assign(e, {meal: sh.meal, food: sh.food, qty: sh.food.source === 'quick' ? 1 : qty, unit: u.id, qtyLabel, grams, totals});
   if (!existing) S.food.push(e);
-  store.saveFood(e); S.sheet = null; render(); toast(existing ? 'Updated' : `Added to ${mealLabel(e.meal)}`);
+  store.saveFood(e);
+  if (!existing && sh.back && sh.back.type === 'add-food') {   // keep adding: back to the list you came from
+    const b = sh.back; b.meal = e.meal; b.added = [...(b.added || []), {name: e.food.name, label: e.qtyLabel, kcal: e.totals.kcal, id: e.id}];
+    S.sheet = b; render();
+    toastUndo(`${e.food.name}${e.qtyLabel ? ' · ' + e.qtyLabel : ''} added`, () => { S.food = S.food.filter(x => x.id !== e.id); store.deleteFood(e.id); b.added = b.added.filter(a => a.id !== e.id); render(); });
+    return true;
+  }
+  S.sheet = null; render(); toast(existing ? 'Updated' : `Added to ${mealLabel(e.meal)}`);
   return true;
 }
 function saveQuickAdd() {

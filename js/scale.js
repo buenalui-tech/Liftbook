@@ -276,7 +276,7 @@ const Scale = {
 };
 
 /* ---------- screens ---------- */
-const ICON_SCALE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="9" width="18" height="11" rx="2"/><path d="M7 9V6a5 5 0 0 1 10 0v3"/><path d="M12 13v3"/></svg>';
+const ICON_SCALE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 8h20"/><rect x="4" y="11" width="16" height="9" rx="2"/><rect x="9" y="14" width="6" height="3" rx=".5"/></svg>';
 // in the portion sheet: a "Weigh on scale" button, or the live weight while weighing
 function weighBlock(sh) {
   const f = sh.food;
