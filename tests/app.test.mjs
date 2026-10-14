@@ -28,7 +28,7 @@ function loadApp(stored = {}, extra = {}) {
   vm.createContext(ctx);
   // top-level const/let live in the context's script scope; expose the names tests need
   const src = FILES.map(f => fs.readFileSync(new URL(`../js/${f}.js`, import.meta.url), 'utf8')).join('\n;\n') +
-    '\n;globalThis.T = {S, store, suggest, e1rm, niceTicks, weightSeries, weeklyRateKg, caloriesFor, improvements, recomputePRs, muscleLoad, musclesFor, tagFor, lastPerf, scanKg, conv, TEMPLATE, CATALOG, slug, startOfDay, fromUsda, fromOff, rankFoods, unitsFor, portionTotals, autoTargets, dayTotals, estimateBurn, targets, targetsFromBurn, computeTargets, nutritionPrefs, proposeTargets, applyCheckin, runAutoCheckin, checkinDue, copyMeal, foodLogs, viewToday, viewFood, viewProgress, viewBody, viewProgram, viewSheet, viewWorkout, startWorkout, viewSettings, buildPhases, Timer, viewTimer, viewTimerSetup, viewMobilitySetup, MOBILITY, viewTrainingLoad, sessionLoad, specFromVals, specToSheet, cleanSpec, specSecs, finishWorkout, timerOutline, viewTimerSetup, microFromUsda, microFromOff, entryMicro, viewMicros, Micro, fromUsda, portionMicros, Scale, esnParse, esnPacket, SCALE_DRIVERS, scaleAmount, weighLog, openPortion, viewPortion, A, viewSettings, matchesQuery, localMatches, searchResultsHTML, onFoodQuery, rememberSearch, searchCache, viewAddFood, ytId, formVideo, FORM_VIDEOS, viewHowto, holdForVideo, playBtn, openCollection, saveCollection, recipeAsFood, setItemAmount, parseSpoken, applySpoken, lookupBarcode, relogLast, savePortion, viewCollection, TEMPLATE_COPY: () => JSON.parse(JSON.stringify(TEMPLATE))};';
+    '\n;globalThis.T = {S, store, suggest, e1rm, niceTicks, weightSeries, weeklyRateKg, caloriesFor, improvements, recomputePRs, muscleLoad, musclesFor, tagFor, lastPerf, scanKg, conv, TEMPLATE, CATALOG, slug, startOfDay, fromUsda, fromOff, rankFoods, unitsFor, portionTotals, autoTargets, dayTotals, estimateBurn, targets, targetsFromBurn, computeTargets, nutritionPrefs, proposeTargets, applyCheckin, runAutoCheckin, checkinDue, copyMeal, foodLogs, viewToday, viewFood, viewProgress, viewBody, viewProgram, viewSheet, viewWorkout, startWorkout, viewSettings, buildPhases, Timer, viewTimer, viewTimerSetup, viewMobilitySetup, MOBILITY, viewTrainingLoad, sessionLoad, specFromVals, specToSheet, cleanSpec, specSecs, finishWorkout, timerOutline, viewTimerSetup, microFromUsda, microFromOff, entryMicro, viewMicros, Micro, fromUsda, portionMicros, Scale, esnParse, esnPacket, SCALE_DRIVERS, scaleAmount, weighLog, repairCalories, usdaNutrients, openPortion, viewPortion, A, viewSettings, matchesQuery, localMatches, searchResultsHTML, onFoodQuery, rememberSearch, searchCache, viewAddFood, ytId, formVideo, FORM_VIDEOS, viewHowto, holdForVideo, playBtn, openCollection, saveCollection, recipeAsFood, setItemAmount, parseSpoken, applySpoken, lookupBarcode, relogLast, savePortion, viewCollection, TEMPLATE_COPY: () => JSON.parse(JSON.stringify(TEMPLATE))};';
   vm.runInContext(src, ctx, {filename: 'liftbook.js'});
   return ctx.T;
 }
@@ -855,4 +855,17 @@ test('body scans: missing segmental fat uses your own split from an earlier full
   T.S.body = [T.S.body[1]];
   const typical = T.scanKg(T.S.body[0]);
   assert.ok(Math.abs(typical.seg.tr.fat - 7.5) < 0.01); assert.equal(typical.estFrom, null);
+});
+
+test('calories: never 0 when the macros are there, from any source, and old entries are repaired', () => {
+  const T = loadApp();
+  // a label listing 0 calories (or only kilojoules) but real macros
+  assert.equal(T.fromOff({code: '1', product_name: 'Milk 2%', nutriments: {'energy-kcal_100g': 0, proteins_100g: 3.4, carbohydrates_100g: 4.9, fat_100g: 2}}).per100.kcal, 51.2);
+  assert.equal(Math.round(T.fromOff({code: '2', product_name: 'Milk', nutriments: {'energy-kj_100g': 209, proteins_100g: 3.3}}).per100.kcal), 50);
+  assert.equal(T.usdaNutrients([{nutrientId: 1008, value: 0}, {nutrientId: 1003, value: 3.3}, {nutrientId: 1005, value: 4.8}, {nutrientId: 1004, value: 2}]).kcal, 50.4);
+  // a milk already logged with 0 calories
+  T.S.food = [{id: 'm', kind: 'log', date: Date.now(), meal: 'breakfast', food: {key: 'off:1', source: 'off', name: 'Milk', per100: {kcal: 0, p: 3.4, c: 4.9, f: 2, fiber: 0}}, qty: 244, unit: 'ml', grams: 244, totals: {kcal: 0, p: 8.3, c: 12, f: 4.9, fiber: 0}}];
+  assert.equal(T.repairCalories(), 1);
+  assert.ok(Math.abs(T.S.food[0].totals.kcal - 125.3) < 0.1); assert.equal(T.S.food[0].food.per100.kcal, 51.2);
+  assert.equal(T.repairCalories(), 0, 'once only');
 });

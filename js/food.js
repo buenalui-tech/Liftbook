@@ -17,11 +17,34 @@ const r1 = n => Math.round(n * 10) / 10;
 const NUTRIENTS0 = () => ({kcal: 0, p: 0, c: 0, f: 0, fiber: 0});
 const usdaKey = () => CFG.usdaApiKey || 'DEMO_KEY';
 
+/* Calories: the first real number the source gives (some list 0, or only kilojoules), otherwise worked out from the
+   macros (4 per gram of protein and carbs, 9 per gram of fat), so a food with macros never shows 0 calories. */
+const firstPositive = (...xs) => xs.map(Number).find(x => x > 0);
+const kcalFromMacros = n => r1(4 * (+n.p || 0) + 4 * (+n.c || 0) + 9 * (+n.f || 0));
+const withKcal = n => n && !(n.kcal > 0) && (+n.p || 0) + (+n.c || 0) + (+n.f || 0) > 0.3 ? {...n, kcal: kcalFromMacros(n)} : n;
 function usdaNutrients(list) {
   const by = {}; for (const n of list || []) by[n.nutrientId] = n.value;
   const p = by[1003] || 0, c = by[1005] || 0, f = by[1004] || 0;
   // Foundation foods often report energy only as Atwater factors (2047/2048)
-  return {kcal: by[1008] ?? by[2047] ?? by[2048] ?? r1(4 * p + 4 * c + 9 * f), p, c, f, fiber: by[1079] || 0};
+  const kcal = firstPositive(by[1008], by[2047], by[2048], by[1062] / 4.184) ?? kcalFromMacros({p, c, f});
+  return {kcal, p, c, f, fiber: by[1079] || 0};
+}
+// foods logged before calories were worked out this way: fill them in (the macros were right all along)
+function repairCalories(list = S.food) {
+  let fixed = 0;
+  const fixItem = x => {
+    if (!x || !x.totals || x.totals.kcal > 0 || !(withKcal(x.totals) !== x.totals)) return false;
+    x.totals = withKcal(x.totals);
+    if (x.food) { if (x.food.per100) x.food.per100 = withKcal(x.food.per100); if (x.food.perServing) x.food.perServing = withKcal(x.food.perServing); }
+    return true;
+  };
+  for (const e of list) {
+    let changed = false;
+    if (e.kind === 'log') changed = fixItem(e);
+    else if ((e.kind === 'meal' || e.kind === 'recipe') && Array.isArray(e.items)) for (const it of e.items) changed = fixItem(it) || changed;
+    if (changed) { delete e.updatedAt; store.saveFood(e); fixed++; }
+  }
+  return fixed;
 }
 function fromUsda(x) {
   const name = String(x.description || '').replace(/^./, ch => ch.toUpperCase());
@@ -33,11 +56,12 @@ function fromUsda(x) {
 function fromOff(p) {
   if (!p) return null;
   const n = p.nutriments || {};
-  const kcal = n['energy-kcal_100g'] ?? (n.energy_100g != null ? r1(n.energy_100g / 4.184) : null);
+  const macros = {p: +n.proteins_100g || 0, c: +n.carbohydrates_100g || 0, f: +n.fat_100g || 0};
+  const kcal = firstPositive(n['energy-kcal_100g'], n['energy-kj_100g'] / 4.184, n.energy_100g / 4.184) ?? (macros.p + macros.c + macros.f > 0.3 ? kcalFromMacros(macros) : n['energy-kcal_100g']);
   if (kcal == null || !(p.product_name || p.generic_name)) return null;
   const sq = parseFloat(p.serving_quantity);
   return {key: 'off:' + p.code, source: 'off', sourceId: String(p.code), name: p.product_name || p.generic_name, brand: String(p.brands || '').split(',')[0].trim(),
-    per100: {kcal: +kcal || 0, p: +n.proteins_100g || 0, c: +n.carbohydrates_100g || 0, f: +n.fat_100g || 0, fiber: +n.fiber_100g || 0}, perServing: null, micro: microFromOff(n),
+    per100: {kcal: r1(+kcal || 0), ...macros, fiber: +n.fiber_100g || 0}, perServing: null, micro: microFromOff(n),
     servings: sq > 0 ? [{label: p.serving_size ? String(p.serving_size).trim() : '1 serving', grams: sq}] : []};
 }
 async function fetchJSON(url, tries = 2) {
@@ -211,6 +235,7 @@ function macroBar(label, val, target, unitLbl, cls) {
 }
 function viewFood() {
   const today = startOfDay(Date.now()); if (!S.day || S.day > today) S.day = today;
+  repairCalories(foodLogs(S.day));
   const day = S.day, tot = dayTotals(day), tg = targets();
   const left = tg ? tg.kcal - tot.kcal : null;
   if (day === today) runAutoCheckin();

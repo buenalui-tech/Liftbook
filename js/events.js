@@ -552,6 +552,7 @@ async function importFile(file) {
   S.workouts = (d.workouts || []).sort((a, b) => b.startedAt - a.startedAt);
   S.body = (d.body || []).sort((a, b) => b.date - a.date);
   S.food = (d.food || []).sort((a, b) => b.date - a.date);
+  repairCalories();
   applyAppearance();
   S.active = d.active || null;
   // defaults keep a zero timestamp so they never overwrite a program already saved in the cloud
