@@ -4,3 +4,5 @@ __pycache__/
 dist/
 captures/
 *.pklg
+liftbook-backup-*.json
+liftbook-sets-*.csv
